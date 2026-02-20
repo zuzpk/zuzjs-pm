@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "esnext",
+    "sourceMap": false,
+    "lib": ["DOM", "ESNext", "DOM.Iterable"],
+    "module": "ESNext",
+    "strict": true,
+    "esModuleInterop": true,
+    "downlevelIteration": true,
+    "preserveWatchOutput": true,
+    "outDir": "dist/cjs",
+    "rootDir": "./src",
+    "jsx": "react-jsx",
+    "noFallthroughCasesInSwitch": true,
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "composite": false,
+    "stripInternal": true,
+    "removeComments": false,
+    "allowImportingTsExtensions": false,
+    "noEmit": false
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["node_modules", "src/**/_*.*"]
+}

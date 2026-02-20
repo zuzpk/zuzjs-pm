@@ -1,0 +1,63 @@
+{
+  "name": "@zuzjs/pm",
+  "version": "0.0.1",
+  "keywords": [
+    "core",
+    "zuz",
+    "zuz.js",
+    "zuz pm",
+    "zuz process manager",
+    "zuzjs"
+  ],
+  "description": "Production grade process manager for the @zuzjs ecosystem",
+  "author": "Zuz.js Team <support@zuz.com.pk>",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "zpm": "./dist/cli.cjs"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "dev:js": "tsup --watch",
+    "dev": "npm-run-all -p dev:*",
+    "build": "rm -rf dist && tsup",
+    "publish": "npm run build && node publish-pre.js && npm publish && node publish-post.js"
+  },
+  "engines": {
+    "node": ">=18.17.0"
+  },
+  "sideEffects": [
+    "reflect-metadata"
+  ],
+  "dependencies": {
+    "chokidar": "^5.0.0",
+    "commander": "^14.0.3",
+    "date-fns": "^4.1.0",
+    "hashids": "^2.3.0",
+    "moment": "^2.30.1",
+    "nanoid": "^5.1.6",
+    "picocolors": "^1.1.1",
+    "pidusage": "^4.0.1"
+  },
+  "devDependencies": {
+    "@types/hashids": "^2.0.0",
+    "@types/md5": "^2.3.6",
+    "@types/node": "^25.3.0",
+    "@types/pidusage": "^2.0.5",
+    "husky": "^9.1.7",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3"
+  }
+}
