@@ -15,10 +15,11 @@
  */
 
 import { Command } from "commander";
+import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import pc from "picocolors";
-import pkgJson from "../package.json";
 import { ZPMClient } from "./client";
 import { getSocketPath } from "./ipc-server";
 import { WorkerMode } from "./types";
@@ -35,11 +36,14 @@ const namespace = options.namespace;
 
 const client = new ZPMClient(namespace);
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const pkgPath = path.resolve(__dirname, `../package.json`)
+const pkg = JSON.parse(fs.readFileSync(pkgPath, `utf8`))
 
 program
   .name("zpm")
   .description("Production grade process manager for the @zuzjs ecosystem")
-  .version(pkgJson.version, '-v, --version', 'output the current version');
+  .version(pkg.version, '-v, --version', 'output the current version');
 
 
 // START
@@ -53,6 +57,11 @@ program
   .option("-c, --cluster", "Use cluster mode instead of fork", false)
   .option("--ws <url>", "WebSocket URL to stream logs (e.g. for ZPanel)", "http://127.0.0.1:2082/_/wss/zpm")
   .option("--save-logs", "Save logs to a local file", false)
+  .option("--args <string>", "Arguments to pass to the script (e.g. \"dev -p 3000\")")
+  .option("--probe-type <type>", "Type of probe: http, tcp, or exec")
+  .option("--probe-target <target>", "URL, host:port, or command")
+  .option("--probe-interval <sec>", "Seconds between probes", parseInt, 30)
+  .option("--probe-threshold <count>", "Failures before restart", parseInt, 3)
   .action(async (script, options) => {
     try {
       await client.ensureDaemon();
@@ -65,6 +74,14 @@ program
         instances: options.instances,
         devMode: options.dev,
         mode: options.cluster ? WorkerMode.Cluster : WorkerMode.Fork,
+        args: options.args ? options.args.split(" ") : [],
+        probe: options.probeTarget ? {
+          type: options.probeType,
+          target: options.probeTarget || (options.probeType === 'http' ? 'http://localhost:3000' : 'localhost:3000'),
+          intervalSeconds: options.probeInterval,
+          failureThreshold: options.probeThreshold,
+          timeoutSeconds: 5
+        } : undefined,
         logs: {
           wsUrl: options.ws,
           saveToFile: options.saveLogs

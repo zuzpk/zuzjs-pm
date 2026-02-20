@@ -203,13 +203,24 @@ export class Worker {
 
   private forkChild(): ChildProcess | null {
     try {
-      const child = spawn("node", [this.cfg.scriptPath, ...(this.cfg.args ?? [])], {
-        // stdio:    "inherit",
-        stdio:    ["ignore", "pipe", "pipe"],
-        env:      { ...process.env, ...(this.cfg.env ?? {}), NODE_ENV: this.cfg.devMode ? "development" : "production" },
-        detached: false,
-        shell:    false,
-      });
+
+    // Check if the script is actually a binary or if we should use node
+    const executable = this.cfg.scriptPath.endsWith('.js') ? 'node' : this.cfg.scriptPath;
+    const args = this.cfg.scriptPath.endsWith('.js') 
+      ? [this.cfg.scriptPath, ...(this.cfg.args ?? [])]
+      : [...(this.cfg.args ?? [])];
+
+      const child = spawn(
+        executable, 
+        args, 
+        {
+          // stdio:    "inherit",
+          stdio:    ["ignore", "pipe", "pipe"],
+          env:      { ...process.env, ...(this.cfg.env ?? {}), NODE_ENV: this.cfg.devMode ? "development" : "production" },
+          detached: false,
+          shell:    false,
+        }
+      );
 
       this.setupLogging(child)
 
