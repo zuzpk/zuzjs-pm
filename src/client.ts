@@ -90,18 +90,28 @@ export class ZPMClient {
   }
 
   /** Spawn the daemon detached if it is not already running */
-  public async ensureDaemon(): Promise<void> {
+  public async ensureDaemon(conf?: {
+    devMode?: boolean,
+  }): Promise<void> {
     
-    if (await this.isDaemonRunning()) {
-      logger.info(`[ZPM]`, `Daemon is Running :)`)
+    const isRunning = await this.isDaemonRunning()
+    if (isRunning) {
+      // this.killDaemon()
       return;
     }
+    // if (isRunning) return;
+    
+    logger.info("Starting ZPM daemon...");
 
-    console.log("[ZPM] Spawning daemon...");
+    const isDev = conf?.devMode ?? process.env.NODE_ENV !== "production";
+
     const child = spawn(process.execPath, [this.daemonScript], {
       detached: true,
-      stdio:    "ignore",
+      // In dev: 'inherit' lets the daemon (and its workers) use THIS terminal.
+      // In prod: 'ignore' detaches completely so you can close the terminal.
+      stdio: isDev ? "inherit" : "ignore",
     });
+
     child.unref();
 
     // Wait for the socket to appear

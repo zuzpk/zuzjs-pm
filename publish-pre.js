@@ -8,8 +8,8 @@ const __dirname = path.dirname(__filename);
 /** 
  * 1. Backup Package.json 
 */
-const packageJsonPath = path.resolve(__dirname, "..", "core", "package.json");
-const backupPath = path.resolve(__dirname, "..", "core", "package.json.bak");
+const packageJsonPath = path.resolve(__dirname, "..", "pm", "package.json");
+const backupPath = path.resolve(__dirname, "..", "pm", "package.json.bak");
 
 /**Backup Package.json to backupPath */
 const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"))
