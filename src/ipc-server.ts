@@ -48,6 +48,13 @@ export function startIPCServer(pm: ProcessManager): net.Server {
   });
 
   server.listen(sockPath, () => {
+    if (os.platform() !== 'win32') {
+      try {
+        fs.chmodSync(sockPath, '777');
+      } catch (err) {
+        console.error("Failed to set socket permissions:", err);
+      }
+    }
     logger.success("IPC", `Listening on ${sockPath}`);
   });
 

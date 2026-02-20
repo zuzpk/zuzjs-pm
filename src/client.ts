@@ -123,7 +123,7 @@ export class ZPMClient {
 
   /** Kill the daemon by PID */
   public async killDaemon(): Promise<void> {
-    const pidFile = path.join(os.tmpdir(), "zuzjs-pm.pid");
+    const pidFile = path.join(os.tmpdir(), "zuz-pm.pid");
     if (!fs.existsSync(pidFile)) {
       throw new Error("Daemon PID file not found – is the daemon running?");
     }
@@ -133,6 +133,9 @@ export class ZPMClient {
       console.log(`[ZPM] Sent SIGTERM to daemon (PID ${pid})`);
     } catch (err) {
       throw new Error(`Failed to kill daemon: ${(err as Error).message}`);
+    }
+    finally {
+      fs.unlinkSync(pidFile)
     }
   }
 

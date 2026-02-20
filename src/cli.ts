@@ -26,7 +26,7 @@ import { WorkerMode } from "./types";
 const program = new Command();
 
 program
-.option("-s, --namespace <name>", "Internal daemon namespace", "zuzjs-pm");
+.option("-s, --namespace <name>", "Internal daemon namespace", "zuz-pm");
 
 program.parseOptions(process.argv);
 
@@ -51,6 +51,8 @@ program
   .option("-i, --instances <number>", "Number of instances (cluster mode)", parseInt, 1)
   .option("-d, --dev", "Enable development mode (auto-restart)", false)
   .option("-c, --cluster", "Use cluster mode instead of fork", false)
+  .option("--ws <url>", "WebSocket URL to stream logs (e.g. for ZPanel)", "http://127.0.0.1:2082/_/wss/zpm")
+  .option("--save-logs", "Save logs to a local file", false)
   .action(async (script, options) => {
     try {
       await client.ensureDaemon();
@@ -63,6 +65,10 @@ program
         instances: options.instances,
         devMode: options.dev,
         mode: options.cluster ? WorkerMode.Cluster : WorkerMode.Fork,
+        logs: {
+          wsUrl: options.ws,
+          saveToFile: options.saveLogs
+        }
       });
       console.log(pc.cyan(`[ZPM]`), msg)
     } catch (err: any) {

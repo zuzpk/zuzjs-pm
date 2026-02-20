@@ -26,7 +26,7 @@ import { ProcessManager } from "./process-manager";
 
 // PID file
 
-const PID_FILE = path.join(os.tmpdir(), "zuzjs-pm.pid");
+const PID_FILE = path.join(os.tmpdir(), "zuz-pm.pid");
 
 function writePid(): void {
   fs.writeFileSync(PID_FILE, String(process.pid));
@@ -40,7 +40,7 @@ function clearPid(): void {
 // On graceful shutdown we write a JSON snapshot of running workers so they can
 // be re-spawned automatically on the next daemon start.
 
-const SNAPSHOT_FILE = path.join(os.tmpdir(), "zuzjs-pm.snapshot.json");
+const SNAPSHOT_FILE = path.join(os.tmpdir(), "zuz-pm.snapshot.json");
 
 function saveSnapshot(pm: ProcessManager): void {
   try {
