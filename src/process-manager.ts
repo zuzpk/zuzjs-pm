@@ -70,6 +70,13 @@ export class ProcessManager {
     logger.info("PM", "All workers stopped.");
   }
 
+  public getWorker(name: string): Worker | null {
+    const worker = this.workers.get(name);
+    if (!worker) return null
+    return worker;
+  }
+
+
   // Private
 
   private require(name: string): Worker {

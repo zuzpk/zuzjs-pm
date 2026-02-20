@@ -4,21 +4,22 @@
  * Each message is a newline-delimited JSON string.
  */
 
+import fs from "node:fs";
 import net from "node:net";
-import os  from "node:os";
-import fs  from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
-import { logger }         from "./logger.js";
+import { logger } from "./logger.js";
 import { ProcessManager } from "./process-manager.js";
 import { IPCCommand, IPCResponse } from "./types.js";
+import { Worker } from "./worker";
 
 // Platform-aware socket path
-export function getSocketPath(): string {
+export function getSocketPath(namespace: string = "zuz-pm"): string {
   if (os.platform() === "win32") {
-    return path.join("\\\\.\\pipe", "zuzjs-pm");
+    return path.join("\\\\.\\pipe", namespace);
   }
-  return path.join(os.tmpdir(), "zuzjs-pm.sock");
+  return path.join(os.tmpdir(), `${namespace}.sock`);
 }
 
 export function startIPCServer(pm: ProcessManager): net.Server {
@@ -104,6 +105,65 @@ async function handleMessage(
 
       case "list":
         data = pm.list();
+        break;
+
+      case "logs":
+          const targetName = cmd.name;
+          const workersToStream: Worker[] = [];
+          
+          // 1. Determine which workers to watch
+          if (targetName) {
+            const worker = pm.getWorker(targetName);
+            if (!worker) {
+              socket.write(JSON.stringify({ ok: false, error: `Worker "${targetName}" not found` }) + "\n");
+              return;
+            }
+            workersToStream.push(worker);
+          } else {
+            // Get all registered workers from the ProcessManager
+            const allNames = pm.list();
+            for (const name of allNames) {
+              const w = pm.getWorker(name);
+              if (w) workersToStream.push(w);
+            }
+          }
+
+          if (workersToStream.length === 0) {
+            socket.write(JSON.stringify({ ok: false, error: "No active workers to stream logs from" }) + "\n");
+            return;
+          }
+
+          // Create a registry for cleanup
+          const activeListeners: Array<{ child: any; onData: (d: Buffer) => void }> = [];
+
+          // Attach listeners to each worker
+          for (const worker of workersToStream) {
+            const mp = worker.mp();
+            // We stream from all children of the worker (in case of Cluster mode)
+            for (const child of mp.children) {
+              const onData = (data: Buffer) => {
+                // Prefix with [name] if we are streaming multiple workers
+                const prefix = targetName ? "" : `[${worker.name}] `;
+                socket.write(JSON.stringify({ 
+                  ok: true, 
+                  data: `${prefix}${data.toString()}` 
+                }) + "\n");
+              };
+
+              child.stdout?.on("data", onData);
+              child.stderr?.on("data", onData);
+              activeListeners.push({ child, onData });
+            }
+          }
+
+          // Cleanup: Remove ALL listeners when the CLI/Socket disconnects
+          socket.on("close", () => {
+            for (const { child, onData } of activeListeners) {
+              child.stdout?.off("data", onData);
+              child.stderr?.off("data", onData);
+            }
+          });
+          
         break;
 
       default:

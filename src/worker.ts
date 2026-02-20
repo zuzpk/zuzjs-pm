@@ -12,6 +12,7 @@ import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import WebSocket from "ws";
 // @ts-ignore – pidusage has types but some bundlers complain
 import pidusage from "pidusage";
 
@@ -76,7 +77,7 @@ function gracefulKill(
 // Worker class
 export class Worker {
   private readonly cfg: WorkerConfig;
-  private readonly name: string;
+  public readonly name: string;
   private watcher: FSWatcher | null = null;
 
   constructor(config: WorkerConfig) {
@@ -203,11 +204,14 @@ export class Worker {
   private forkChild(): ChildProcess | null {
     try {
       const child = spawn("node", [this.cfg.scriptPath, ...(this.cfg.args ?? [])], {
-        stdio:    "inherit",
+        // stdio:    "inherit",
+        stdio:    ["ignore", "pipe", "pipe"],
         env:      { ...process.env, ...(this.cfg.env ?? {}), NODE_ENV: this.cfg.devMode ? "development" : "production" },
         detached: false,
         shell:    false,
       });
+
+      this.setupLogging(child)
 
       const startTime = Date.now();
 
@@ -379,7 +383,7 @@ export class Worker {
     });
   }
 
-  private mp(): ManagedProcess {
+  public mp(): ManagedProcess {
     return processStore.get(this.name)!;
   }
 
@@ -393,4 +397,37 @@ export class Worker {
     if (stabilityTimer) clearTimeout(stabilityTimer);
     this.patch({ restartTimer: null, stabilityTimer: null });
   }
+
+  private setupLogging(child: ChildProcess) {
+
+    const wsUrl = this.cfg.logs?.wsUrl;
+    let ws: WebSocket | null = null;
+
+    if (wsUrl) {
+      ws = new WebSocket(wsUrl);
+      ws.on('open', () => logger.debug(this.name, "Connected to log collector"));
+      ws.on('error', (err: any) => logger.error(this.name, "Log Collector WS Error", err.message));
+    }
+
+    const handleData = (data: Buffer) => {
+      const message = data.toString();
+      
+      // 1. Print to local terminal if in dev mode
+      if (this.cfg.devMode) process.stdout.write(`[${this.name}] ${message}`);
+
+      // 2. Stream to ZPanel WebSocket
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          app: this.name,
+          timestamp: Date.now(),
+          log: message
+        }));
+      }
+    };
+
+    child.stdout?.on('data', handleData);
+    child.stderr?.on('data', handleData);
+
+  }
+
 }

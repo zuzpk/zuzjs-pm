@@ -28,10 +28,10 @@ import {
 
 // Internal IPC transport
 
-function send(cmd: IPCCommand): Promise<unknown> {
+function send(cmd: IPCCommand, namespace: string = "zuz-pm"): Promise<unknown> {
   return new Promise((resolve, reject) => {
 
-    const socket = net.createConnection(getSocketPath());
+    const socket = net.createConnection(getSocketPath(namespace));
     let   buf    = "";
 
     socket.on("connect", () => {
@@ -69,10 +69,15 @@ function send(cmd: IPCCommand): Promise<unknown> {
 
 export class ZPMClient {
   private readonly daemonScript: string;
+  private namespace: string;
 
-  constructor(daemonScript?: string) {
+  constructor(conf?: {
+    daemonScript?: string;
+    namespace?: string;
+  }) {
+    this.namespace = conf?.namespace ?? "zuz-pm";
     // Default: resolved from the same package dist folder
-    this.daemonScript = daemonScript ?? path.join(__dirname, "daemon.js");
+    this.daemonScript = conf?.daemonScript ?? path.join(__dirname, "daemon.js");
   }
 
   // Daemon management
@@ -81,7 +86,7 @@ export class ZPMClient {
   public async isDaemonRunning(): Promise<boolean> {
     try {
       logger.info(`[ZPM]`, `Daemon is Running :?`)
-      await send({ cmd: "ping" });
+      await send({ cmd: "ping" }, this.namespace);
       return true;
     } catch {
       logger.info(`[ZPM]`, `Daemon is not running.`)
@@ -90,9 +95,7 @@ export class ZPMClient {
   }
 
   /** Spawn the daemon detached if it is not already running */
-  public async ensureDaemon(conf?: {
-    devMode?: boolean,
-  }): Promise<void> {
+  public async ensureDaemon(): Promise<void> {
     
     const isRunning = await this.isDaemonRunning()
     if (isRunning) {
@@ -103,7 +106,7 @@ export class ZPMClient {
     
     logger.info("Starting ZPM daemon...");
 
-    const isDev = conf?.devMode ?? process.env.NODE_ENV !== "production";
+    const isDev = process.env.NODE_ENV !== "production";
 
     const child = spawn(process.execPath, [this.daemonScript], {
       detached: true,
@@ -136,29 +139,29 @@ export class ZPMClient {
   // Worker control
 
   public async start(config: WorkerConfig): Promise<string> {
-    return send({ cmd: "start", name: config.name, config }) as Promise<string>;
+    return send({ cmd: "start", name: config.name, config }, this.namespace) as Promise<string>;
   }
 
   public async stop(name: string): Promise<string> {
-    return send({ cmd: "stop", name }) as Promise<string>;
+    return send({ cmd: "stop", name }, this.namespace) as Promise<string>;
   }
 
   public async restart(name: string): Promise<string> {
-    return send({ cmd: "restart", name }) as Promise<string>;
+    return send({ cmd: "restart", name }, this.namespace) as Promise<string>;
   }
 
   public async delete(name: string): Promise<string> {
-    return send({ cmd: "delete", name }) as Promise<string>;
+    return send({ cmd: "delete", name }, this.namespace) as Promise<string>;
   }
 
   // Telemetry
 
   public async stats(name?: string): Promise<WorkerStats[]> {
-    return send({ cmd: "stats", name }) as Promise<WorkerStats[]>;
+    return send({ cmd: "stats", name }, this.namespace) as Promise<WorkerStats[]>;
   }
 
   public async list(): Promise<string[]> {
-    return send({ cmd: "list" }) as Promise<string[]>;
+    return send({ cmd: "list" }, this.namespace) as Promise<string[]>;
   }
 
   // Helpers

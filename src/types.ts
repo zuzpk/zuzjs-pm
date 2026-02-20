@@ -37,6 +37,14 @@ export interface WorkerConfig {
   maxBackoff?: number;
   /** Liveness probe configuration */
   probe?: LivenessProbeConfig;
+  /** Logs Setup */
+  logs?: {
+    /** Websocket Url to send logs 
+     * e.g., "ws://localhost:4000/logs" */
+    wsUrl?: string;
+    /** Either to save logs to file or not */
+    saveToFile?: boolean;
+  }
 }
 
 export interface LivenessProbeConfig {
@@ -72,7 +80,8 @@ export type IPCCommand =
   | { cmd: "delete";  name: string }
   | { cmd: "stats";   name?: string }
   | { cmd: "list" }
-  | { cmd: "ping" };
+  | { cmd: "ping" }
+  | { cmd: "logs"; name?: string };
 
 export type IPCResponse =
   | { ok: true;  data: unknown }
