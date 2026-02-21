@@ -122,6 +122,7 @@ program
           saveToFile: options.saveLogs
         }
       });
+      
       console.log(pc.cyan(`[ZPM]`), msg)
 
       if (options.dev) {

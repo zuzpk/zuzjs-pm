@@ -4,11 +4,13 @@
  * exposes the unified API used by both the IPC daemon and programmatic callers.
  */
 
+import pc from "picocolors";
 import { logger } from "./logger";
 import { processStore } from "./store";
 import {
   WorkerConfig,
-  WorkerStats
+  WorkerStats,
+  WorkerStatus
 } from "./types";
 import { Worker } from "./worker";
 
@@ -18,10 +20,30 @@ export class ProcessManager {
   // CRUD
 
   public async start(config: WorkerConfig): Promise<void> {
-    if (this.workers.has(config.name)) {
-      logger.warn("PM", `Worker "${config.name}" already registered – use restart()`);
+
+    const _worker = this.workers.get(config.name)
+
+    if (_worker) {
+
+      const state = processStore.get(config.name);
+    
+      // If it exists but is stopped/crashed, just trigger the start on the existing instance
+      if (
+        state?.status === WorkerStatus.Stopped || 
+        state?.status === WorkerStatus.Crashed || 
+        state?.status === WorkerStatus.Errored
+      ) {
+        
+        logger.info("ZPM", `Resuming existing worker "${config.name}"`);
+        await _worker.start();
+        return;
+      }
+
+      logger.warn("ZPM", `Worker "${pc.cyan(config.name)}" is ${pc.cyan(state?.status)} - use restart()`);
       return;
+
     }
+
     const worker = new Worker(config);
     this.workers.set(config.name, worker);
     await worker.start();
