@@ -541,15 +541,32 @@ export class Worker {
     }
   }
 
-  // File watcher (dev mode)
+  private findProjectRoot(startPath: string): string {
 
+    let current = path.resolve(startPath);
+    
+    // If startPath is a file, start from its directory
+    if (fs.existsSync(current) && fs.statSync(current).isFile()) {
+      current = path.dirname(current);
+    }
+
+    while (current !== path.parse(current).root) {
+      if (fs.existsSync(path.join(current, "package.json"))) {
+        return current;
+      }
+      current = path.dirname(current);
+    }
+
+    // Fallback to process.cwd() if no package.json is found
+    return process.cwd();
+  }
+
+  // File watcher (dev mode)
   private watchFiles(): void {
 
     this.stopWatcher();
 
-    // We watch the source directory (usually 'src' or project root)
-    // If your script is in dist/zapp.js, we likely want to watch the root or src
-    const projectRoot = process.cwd(); 
+    const projectRoot = this.findProjectRoot(this.cfg.scriptPath);
     const watchDir = path.resolve(projectRoot, "src");
 
     logger.info(this.name, pc.gray(`Watcher active on: ${watchDir}`));
