@@ -69,25 +69,6 @@ async function freePort(port: number): Promise<void> {
   await new Promise((r) => setTimeout(r, 800)); // Give OS time to release
 }
 
-
-function _gracefulKill(
-  proc: ChildProcess | ClusterWorker,
-  timeout: number
-): void {
-  const pid = (proc as ClusterWorker).process?.pid ?? (proc as ChildProcess).pid;
-  if (!pid) return;
-
-  try { process.kill(pid, "SIGTERM"); } catch { /* already dead */ return; }
-
-  const killer = setTimeout(() => {
-    try { process.kill(pid, "SIGKILL"); } catch { /* ignore */ }
-  }, timeout);
-
-  // Clear killer if the process actually exits before timeout
-  (proc as ChildProcess).once?.("exit", () => clearTimeout(killer));
-  (proc as ClusterWorker).once?.("exit", () => clearTimeout(killer));
-}
-
 async function gracefulKill(
   proc: ChildProcess | ClusterWorker,
   timeout: number
@@ -240,21 +221,6 @@ export class Worker {
   this.patch({ children: [], status: WorkerStatus.Stopped, startTime: null });
   this.stopWatcher();
   logger.success(this.name, "Stopped.");
-}
-
-  public async _stop(): Promise<void> {
-    const mp = this.mp();
-    this.patch({ status: WorkerStatus.Stopping, isRestarting: false });
-    this.clearTimers();
-    this.stopProbe();
-
-    for (const child of mp.children) {
-      gracefulKill(child, this.cfg.killTimeout ?? DEFAULT_KILL_TIMEOUT);
-    }
-
-    this.stopWatcher();
-    this.patch({ children: [], status: WorkerStatus.Stopped, startTime: null });
-    logger.info(this.name, "Stopped.");
   }
 
   public async restart(): Promise<void> {
@@ -279,19 +245,6 @@ export class Worker {
     // After all are dead, we trigger a fresh spawn
     this.patch({ isRestarting: false, children: [] });
     // await this.spawnAll();
-    // spawnAll is called from exit handler when isRestarting = true
-  }
-
-  public async _restart(): Promise<void> {
-    logger.info(this.name, "Restarting...");
-    const mp = this.mp();
-    this.patch({ isRestarting: true });
-    this.clearTimers();
-    this.stopProbe();
-
-    for (const child of mp.children) {
-      gracefulKill(child, this.cfg.killTimeout ?? DEFAULT_KILL_TIMEOUT);
-    }
     // spawnAll is called from exit handler when isRestarting = true
   }
 
@@ -377,6 +330,72 @@ export class Worker {
   }
 
   private forkChild(): ChildProcess | null {
+    try {
+      const isJs = this.cfg.scriptPath.endsWith('.js');
+      // Determine if we are running a file or a global command (like 'tsc')
+      const isAbsolute = path.isAbsolute(this.cfg.scriptPath);
+
+      let executable: string;
+      let args: string[];
+      let cwd: string;
+
+      if (isJs) {
+        // Scenario A: Standard Node.js script
+        executable = process.execPath; // Using process.execPath is safer than 'node'
+        args = [this.cfg.scriptPath, ...(this.cfg.args ?? [])];
+        // Your existing logic: Go up one level from dist
+        cwd = path.dirname(path.resolve(this.cfg.scriptPath, '..'));
+      } else {
+        // Scenario B: Global command (tsc, ls, etc.)
+        executable = this.cfg.scriptPath;
+        args = [...(this.cfg.args ?? [])];
+        
+        // For global commands, use current working directory or the directory of the command if absolute
+        cwd = isAbsolute 
+          ? path.dirname(this.cfg.scriptPath) 
+          : process.cwd();
+      }
+
+      const child = spawn(
+        executable,
+        args,
+        {
+          cwd,
+          stdio: ["ignore", "pipe", "pipe"],
+          env: { 
+            ...process.env, 
+            ...(this.cfg.env ?? {}), 
+            NODE_ENV: this.cfg.devMode ? "development" : "production",
+            // Add local node_modules/.bin to path so 'tsc' can be found even if not global
+            PATH: `${path.resolve(process.cwd(), 'node_modules/.bin')}${path.delimiter}${process.env.PATH}`
+          },
+          detached: false,
+          // Set shell to true for non-JS commands to support pipes/redirection if needed
+          shell: !isJs, 
+        }
+      );
+
+      this.setupLogging(child);
+
+      const startTime = Date.now();
+
+      child.on("error", (err) => {
+        logger.error(this.name, `Spawn error (${executable}):`, err.message);
+      });
+
+      child.on("exit", (code, signal) => {
+        const uptime = Date.now() - startTime;
+        this.onChildExit(child, code, signal, uptime);
+      });
+
+      return child;
+    } catch (err: any) {
+      logger.error(this.name, "Failed to fork child:", err.message);
+      return null;
+    }
+  }
+
+  private _forkChild(): ChildProcess | null {
     try {
 
     // Check if the script is actually a binary or if we should use node
