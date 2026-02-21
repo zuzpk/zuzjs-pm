@@ -154,6 +154,15 @@ export class ZPMClient {
   }
   // Worker control
 
+  public async startWorker(name: string): Promise<string> {
+    const worker = await this.getWorkerByName(name)
+    if ( worker ){
+      return this.start(worker.getConfig())
+    }
+    logger.info(name, `Worker ${name} not found`)
+    return `Worker ${name} not found`
+  }
+
   public async start(config: WorkerConfig): Promise<string> {
     return send({ cmd: "start", name: config.name, config }, this.namespace) as Promise<string>;
   }
