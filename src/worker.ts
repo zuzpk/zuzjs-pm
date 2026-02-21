@@ -214,7 +214,11 @@ export class Worker {
 
   public async stop(): Promise<void> {
   const mp = this.mp();
-  if (mp.status === WorkerStatus.Stopping) return;
+  if (mp.status === WorkerStatus.Stopping){
+    logger.info(this.name, `Already stopping...`)
+    return;
+  } 
+    
 
   this.patch({ status: WorkerStatus.Stopping, isRestarting: false });
   logger.info(this.name, `Stopping ${mp.children.length} instances...`);
@@ -446,7 +450,7 @@ export class Worker {
           this.name,
           `Immediate crash (${uptime}ms) – likely a syntax/build error. Waiting for next file change.`
         );
-        return;
+        // return;
       }
 
       this.scheduleRestart();
