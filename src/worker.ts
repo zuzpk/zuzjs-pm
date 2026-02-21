@@ -584,6 +584,10 @@ export class Worker {
       );
     }
 
+    if (partial.lastError) {
+      logger.error(this.name, `[REASON] ${partial.lastError}`);
+    }
+
     processStore.set(this.name, { ...current, ...partial });
   }
 

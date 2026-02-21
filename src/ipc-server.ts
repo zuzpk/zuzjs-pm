@@ -9,9 +9,10 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 
-import { logger } from "./logger.js";
-import { ProcessManager } from "./process-manager.js";
-import { IPCCommand, IPCResponse } from "./types.js";
+import { logger } from "./logger";
+import { ProcessManager } from "./process-manager";
+import { processStore } from "./store";
+import { IPCCommand, IPCResponse } from "./types";
 import { Worker } from "./worker";
 
 // Platform-aware socket path
@@ -114,6 +115,21 @@ async function handleMessage(
         data = pm.list();
         break;
 
+      case "get-store": {
+        // Returns all managed processes in the store
+        data = Array.from(processStore.all()).map(([name, mp]) => ({
+          name,
+          status: mp.status,
+          childrenCount: mp.children.length,
+          restartCount: mp.restartCount,
+          backoffTime: mp.backoffTime,
+          isRestarting: mp.isRestarting,
+          probeFailures: mp.probeFailures
+        }));
+        // socket.write(JSON.stringify({ type: "store-data", data }) + "\n");
+        break;
+      }
+
       case "logs":
           const targetName = cmd.name;
           const workersToStream: Worker[] = [];
@@ -174,7 +190,8 @@ async function handleMessage(
         break;
 
       default:
-        throw new Error(`Unknown command: ${(cmd as IPCCommand).cmd}`);
+          logger.error(`ZPM`, `Unknown command: ${(cmd as IPCCommand).cmd}`)
+        // throw new Error(`Unknown command: ${(cmd as IPCCommand).cmd}`);
     }
 
     reply(socket, { ok: true, data });

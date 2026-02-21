@@ -1,5 +1,9 @@
 import { ChildProcess } from "node:child_process";
 
+export type dynamic = { 
+    [x: string] : any 
+}
+
 export enum WorkerMode {
   Fork = "fork",       // child_process.spawn – isolated scripts
   Cluster = "cluster", // node:cluster – load-balanced web servers
@@ -81,7 +85,8 @@ export type IPCCommand =
   | { cmd: "stats";   name?: string }
   | { cmd: "list" }
   | { cmd: "ping" }
-  | { cmd: "logs"; name?: string };
+  | { cmd: "logs"; name?: string }
+  | { cmd: "get-store" };
 
 export type IPCResponse =
   | { ok: true;  data: unknown }
@@ -99,4 +104,5 @@ export interface ManagedProcess {
   probeTimer: NodeJS.Timeout | null;
   probeFailures: number;
   isRestarting: boolean;
+  lastError?: string;
 }

@@ -139,6 +139,9 @@ export class ZPMClient {
     }
   }
 
+  public async getStore() : Promise<IPCResponse> {
+    return send({ cmd: "get-store" }, this.namespace) as Promise<IPCResponse>
+  }
   // Worker control
 
   public async start(config: WorkerConfig): Promise<string> {

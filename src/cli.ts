@@ -40,6 +40,40 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const pkgPath = path.resolve(__dirname, `../package.json`)
 const pkg = JSON.parse(fs.readFileSync(pkgPath, `utf8`))
 
+async function attachLogStream(namespace: string, name: string | undefined) {
+  const isRunning = await client.isDaemonRunning();
+  if (!isRunning) return;
+
+  const label = name ? `"${name}"` : "all workers";
+  console.log(pc.cyan(`[ZPM]`), pc.gray(`Attaching stream for ${label}...`));
+
+  const socket = net.createConnection(getSocketPath(namespace));
+  socket.write(JSON.stringify({ cmd: "logs", name }) + "\n");
+
+  socket.on("data", (chunk) => {
+    const lines = chunk.toString().split("\n");
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const res = JSON.parse(line);
+        if (res.ok) {
+          process.stdout.write(res.data);
+        }
+      } catch (e) { /* ignore partials */ }
+    }
+  });
+
+  socket.on("error", (err) => {
+    console.error(pc.red(`[IPC Error] ${err.message}`));
+  });
+
+  process.on("SIGINT", () => {
+    socket.destroy();
+    console.log(pc.gray("\nDisconnected from logs."));
+    process.exit();
+  });
+}
+
 program
   .name("zpm")
   .description("Production grade process manager for the @zuzjs ecosystem")
@@ -66,7 +100,8 @@ program
     try {
       await client.ensureDaemon();
       const scriptPath = path.resolve(process.cwd(), script);
-      
+      const processName = options.name ?? path.basename(script);
+
       const msg = await client.start({
         name: options.name ?? path.basename(script),
         scriptPath,
@@ -88,6 +123,13 @@ program
         }
       });
       console.log(pc.cyan(`[ZPM]`), msg)
+
+      if (options.dev) {
+        await attachLogStream(namespace, processName);
+      } else {
+        process.exit(0); // Exit if not in dev mode to return terminal control
+      }
+
     } catch (err: any) {
       console.log(pc.cyan(`[ZPM]`), pc.red(`[ERROR]`), err.message)
     }
@@ -208,6 +250,28 @@ program
   .action(async () => {
     await client.killDaemon();
     console.log("\x1b[33mDaemon killed.\x1b[0m");
+  });
+
+
+program
+  .command("store")
+  .description("Show raw internal store state for debugging")
+  .action(async () => {
+    const response = await client.getStore();
+    if ( response.ok ){
+      const data : any[] = response.data as any[]
+      if (data.length === 0) {
+        console.log(pc.yellow("Store is empty."));
+        return;
+      }
+
+      console.log(pc.magenta("\n--- Internal Process Store ---"));
+      console.table(data);
+      console.log(pc.gray(`Total Managed Processes: ${data.length}\n`));
+    }
+    else{
+      console.log(`StoreError`, response);
+    }
   });
 
 program.parse(process.argv);

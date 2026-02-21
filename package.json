@@ -1,6 +1,6 @@
 {
   "name": "@zuzjs/pm",
-  "version": "0.0.10",
+  "version": "0.0.13",
   "keywords": [
     "core",
     "zuz",
@@ -51,6 +51,7 @@
     "nanoid": "^5.1.6",
     "picocolors": "^1.1.1",
     "pidusage": "^4.0.1",
+    "winston": "^3.19.0",
     "ws": "^8.19.0"
   },
   "devDependencies": {
