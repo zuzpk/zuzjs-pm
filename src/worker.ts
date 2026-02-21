@@ -46,15 +46,29 @@ async function isPortFree(port: number): Promise<boolean> {
   });
 }
 
-async function freePort(port: number): Promise<void> {
+async function _freePort(port: number): Promise<void> {
   if (await isPortFree(port)) return;
   logger.warn("port", `Port ${port} busy – attempting fuser kill`);
+  
   await new Promise<void>((resolve) =>
     exec(`fuser -k -9 ${port}/tcp 2>/dev/null; true`, () => resolve())
   );
   // brief settle
   await new Promise((r) => setTimeout(r, 500));
 }
+
+async function freePort(port: number): Promise<void> {
+  if (await isPortFree(port)) return;
+  
+  // macOS specific port killing
+  const cmd = os.platform() === 'darwin' 
+    ? `lsof -ti :${port} | xargs kill -9 2>/dev/null || true`
+    : `fuser -k -9 ${port}/tcp 2>/dev/null; true`;
+
+  await new Promise<void>((resolve) => exec(cmd, () => resolve()));
+  await new Promise((r) => setTimeout(r, 800)); // Give OS time to release
+}
+
 
 function _gracefulKill(
   proc: ChildProcess | ClusterWorker,
@@ -141,16 +155,51 @@ export class Worker {
   }
 
   // Public lifecycle
+
   public async start(): Promise<void> {
     const mp = this.mp();
+    
+    // If it's already running, don't double-start
     if (mp.status === WorkerStatus.Running || mp.status === WorkerStatus.Starting) {
       logger.warn(this.name, "Already running – ignoring start()");
       return;
     }
-    this.patch({ status: WorkerStatus.Starting });
+
+    // Reset backoff and failures for a fresh manual start
+    this.patch({ 
+      status: WorkerStatus.Starting, 
+      backoffTime: INIT_BACKOFF, 
+      restartCount: 0,
+      probeFailures: 0 
+    });
+
+    this.clearTimers(); // Ensure no old restart timers are ticking
     await this.spawnAll();
+    
     if (this.cfg.devMode) this.watchFiles();
   }
+
+  // public async start(): Promise<void> {
+  //   const mp = this.mp();
+  //   if (mp.status === WorkerStatus.Running || mp.status === WorkerStatus.Starting) {
+  //     logger.warn(this.name, "Already running – ignoring start()");
+  //     return;
+  //   }
+  //   this.patch({ status: WorkerStatus.Starting });
+  //   await this.spawnAll();
+  //   if (this.cfg.devMode) this.watchFiles();
+  // }
+
+  // public async start(): Promise<void> {
+  //   const mp = this.mp();
+  //   if (mp.status === WorkerStatus.Running || mp.status === WorkerStatus.Starting) {
+  //     logger.warn(this.name, "Already running – ignoring start()");
+  //     return;
+  //   }
+  //   this.patch({ status: WorkerStatus.Starting });
+  //   await this.spawnAll();
+  //   if (this.cfg.devMode) this.watchFiles();
+  // }
 
   public async stop(): Promise<void> {
   const mp = this.mp();
@@ -281,6 +330,12 @@ export class Worker {
     for (let i = 0; i < instances; i++) {
       const child = this.forkChild();
       if (child) children.push(child);
+    }
+
+    if (children.length === 0) {
+      logger.error(this.name, "Failed to spawn any instances.");
+      this.patch({ status: WorkerStatus.Stopped }); // If spawn failed, stay Stopped
+      return;
     }
 
     this.patch({
