@@ -12,6 +12,7 @@ import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import pc from "picocolors";
 import WebSocket from "ws";
 // @ts-ignore – pidusage has types but some bundlers complain
 import pidusage from "pidusage";
@@ -128,6 +129,7 @@ export class Worker {
   private readonly cfg: WorkerConfig;
   public readonly name: string;
   private watcher: FSWatcher | null = null;
+  private isBuilding = false;
 
   constructor(config: WorkerConfig) {
     this.cfg  = { mode: WorkerMode.Fork, instances: 1, ...config };
@@ -542,25 +544,64 @@ export class Worker {
   // File watcher (dev mode)
 
   private watchFiles(): void {
-    this.stopWatcher();
-    const dir = path.dirname(this.cfg.scriptPath);
 
-    this.watcher = chokidar.watch(dir, {
+    this.stopWatcher();
+
+    // We watch the source directory (usually 'src' or project root)
+    // If your script is in dist/zapp.js, we likely want to watch the root or src
+    const projectRoot = process.cwd(); 
+    const watchDir = path.resolve(projectRoot, "src");
+
+    logger.info(this.name, pc.gray(`Watcher active on: ${watchDir}`));
+
+    // const dir = path.dirname(this.cfg.scriptPath);
+
+    this.watcher = chokidar.watch(watchDir, {
       ignored:       [/node_modules/, /\.pid$/],
       persistent:    true,
       ignoreInitial: true,
       awaitWriteFinish: { stabilityThreshold: 1_500, pollInterval: 500 },
     });
 
-    this.watcher.on("all", (event, filePath) => {
+    this.watcher.on("all", async (event, filePath) => {
+
+      if (this.isBuilding) return;
+
       if (event === "change" || event === "add") {
-        logger.info(this.name, `File ${event}: ${path.basename(filePath)} – restarting`);
-        this.restart();
+        logger.info(this.name, pc.yellow(`File ${event}: ${path.basename(filePath)} – restarting`));
+        if ( this.cfg.reloadCommand ){
+          this.isBuilding = true;
+
+          logger.info(this.name, pc.blue(`Executing: ${this.cfg.reloadCommand}`));
+          
+          const { exec } = await import("node:child_process");
+
+          exec(this.cfg.reloadCommand, {
+            cwd: projectRoot,
+            env: { 
+              ...process.env, 
+              PATH: `${path.resolve(projectRoot, 'node_modules/.bin')}${path.delimiter}${process.env.PATH}` 
+            }
+          }, (err, stdout, stderr) => {
+            this.isBuilding = false;
+            
+            if (err) {
+              logger.error(this.name, `Build Failed:\n${stderr || stdout || err.message}`);
+              return; // Stop here, don't restart if build is broken
+            }
+
+            logger.success(this.name, "Build successful. Triggering restart...");
+
+            this.restart();
+
+          });
+        }
+        else this.restart();
       }
     });
 
     this.watcher.on("error", (err) => logger.error(this.name, "Watcher error:", err));
-    this.watcher.on("ready", () => logger.info(this.name, `Watching ${dir}`));
+    this.watcher.on("ready", () => logger.info(this.name, `Watching ${projectRoot}`));
   }
 
   private stopWatcher(): void {

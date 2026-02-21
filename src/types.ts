@@ -48,7 +48,11 @@ export interface WorkerConfig {
     wsUrl?: string;
     /** Either to save logs to file or not */
     saveToFile?: boolean;
-  }
+  },
+  /** Command to run in dev mode on reload 
+   * e.g., "npm run build" or "tsc && tsc-alias"
+  */
+  reloadCommand?: string;
 }
 
 export interface LivenessProbeConfig {
