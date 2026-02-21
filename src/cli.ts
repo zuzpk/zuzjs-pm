@@ -87,7 +87,10 @@ program
   .option("-n, --name <name>", "Unique name for the process")
   .option("-p, --port <port>", "Port the app listens on", parseInt)
   .option("-i, --instances <number>", "Number of instances (cluster mode)", parseInt, 1)
+  
   .option("-d, --dev", "Enable development mode (auto-restart)", false)
+  .option("--reload-cmd <command>", "Command to run before restarting in dev mode")
+
   .option("-c, --cluster", "Use cluster mode instead of fork", false)
   .option("--ws <url>", "WebSocket URL to stream logs (e.g. for ZPanel)", "http://127.0.0.1:2082/_/wss/zpm")
   .option("--save-logs", "Save logs to a local file", false)
@@ -110,6 +113,7 @@ program
         devMode: options.dev,
         mode: options.cluster ? WorkerMode.Cluster : WorkerMode.Fork,
         args: options.args ? options.args.split(" ") : [],
+        reloadCommand: options.reloadCmd,
         probe: options.probeTarget ? {
           type: options.probeType,
           target: options.probeTarget || (options.probeType === 'http' ? 'http://localhost:3000' : 'localhost:3000'),
