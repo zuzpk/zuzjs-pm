@@ -74,42 +74,57 @@ function _gracefulKill(
   (proc as ClusterWorker).once?.("exit", () => clearTimeout(killer));
 }
 
-function gracefulKill(
+async function gracefulKill(
   proc: ChildProcess | ClusterWorker,
   timeout: number
 ): Promise<void> {
   const pid = (proc as ClusterWorker).process?.pid ?? (proc as ChildProcess).pid;
-  if (!pid) return Promise.resolve();
+  if (!pid) return;
 
   return new Promise((resolve) => {
-    let resolved = false;
+    let isDone = false;
 
-    const done = () => {
-      if (resolved) return;
-      resolved = true;
+    const cleanup = () => {
+      if (isDone) return;
+      isDone = true;
       clearTimeout(killer);
       resolve();
     };
 
-    // Listen for exit from any source
-    (proc as ChildProcess).once?.("exit", done);
-    (proc as ClusterWorker).once?.("exit", done);
+    // Listen for the standard exit event
+    (proc as ChildProcess).once?.("exit", cleanup);
+    (proc as ClusterWorker).once?.("exit", cleanup);
 
+    // Attempt SIGTERM
     try {
       process.kill(pid, "SIGTERM");
     } catch (e) {
-      return done(); // Already dead
+      return cleanup(); // Process is already gone
     }
 
+    // Forceful fallback
     const killer = setTimeout(() => {
       try {
+        // If still alive, send the unblockable SIGKILL
         process.kill(pid, "SIGKILL");
-        // SIGKILL is immediate, but we give the OS a tiny slice to update the proc table
-        setTimeout(done, 50); 
-      } catch {
-        done();
+        
+        // On Unix, we might need a tiny delay for the OS to reap the process
+        setTimeout(cleanup, 100); 
+      } catch (e) {
+        cleanup();
       }
     }, timeout);
+
+    // Final safety: check if PID is actually gone from the OS table
+    const checkInterval = setInterval(() => {
+      try {
+        process.kill(pid, 0); // signal 0 checks for existence
+      } catch (e) {
+        // If this throws, the process is gone
+        clearInterval(checkInterval);
+        cleanup();
+      }
+    }, 500);
   });
 }
 
@@ -138,31 +153,30 @@ export class Worker {
   }
 
   public async stop(): Promise<void> {
-    
-    const mp = this.mp();
+  const mp = this.mp();
+  if (mp.status === WorkerStatus.Stopping) return;
 
-    if (mp.status === WorkerStatus.Stopping) return;
+  this.patch({ status: WorkerStatus.Stopping, isRestarting: false });
+  logger.info(this.name, `Stopping ${mp.children.length} instances...`);
 
-    logger.info(this.name, `Stopping...`);
-    this.patch({ status: WorkerStatus.Stopping, isRestarting: false });
+  this.clearTimers();
+  this.stopProbe();
+  this.stopWatcher();
 
-    this.clearTimers();
-    this.stopProbe();
-    this.stopWatcher();
-
-    await Promise.all(
-      mp.children.map(child => 
-        gracefulKill(child, this.cfg.killTimeout ?? DEFAULT_KILL_TIMEOUT)
-      )
-    );
-
-    // for (const child of mp.children) {
-    //   gracefulKill(child, this.cfg.killTimeout ?? DEFAULT_KILL_TIMEOUT);
-    // }
-
-    this.patch({ children: [], status: WorkerStatus.Stopped, startTime: null });
-    logger.info(this.name, "Stopped.");
+  try {
+    // We add a total safety timeout here so ZPM never hangs indefinitely
+    await Promise.race([
+      Promise.all(mp.children.map(c => gracefulKill(c, this.cfg.killTimeout ?? DEFAULT_KILL_TIMEOUT))),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("Termination timeout")), 10000))
+    ]);
+  } catch (err: any) {
+    logger.error(this.name, `Stop timed out, forcing state reset: ${err.message || `UNKNOWN`}`);
   }
+
+  this.patch({ children: [], status: WorkerStatus.Stopped, startTime: null });
+  this.stopWatcher();
+  logger.success(this.name, "Stopped.");
+}
 
   public async _stop(): Promise<void> {
     const mp = this.mp();
