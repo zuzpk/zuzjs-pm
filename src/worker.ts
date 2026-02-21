@@ -168,15 +168,26 @@ export class Worker {
     // Reset backoff and failures for a fresh manual start
     this.patch({ 
       status: WorkerStatus.Starting, 
-      backoffTime: INIT_BACKOFF, 
-      restartCount: 0,
-      probeFailures: 0 
+      isRestarting: false,
+      children: [],          // Ensure no ghost pids are tracked
+      restartCount: 0, 
+      backoffTime: INIT_BACKOFF,
+      probeFailures: 0,
+      startTime: null 
     });
 
-    this.clearTimers(); // Ensure no old restart timers are ticking
-    await this.spawnAll();
-    
-    if (this.cfg.devMode) this.watchFiles();
+    this.clearTimers(); 
+    this.stopProbe();
+
+    logger.info(this.name, "Initializing fresh start...");
+  
+    try {
+      await this.spawnAll();
+      if (this.cfg.devMode) this.watchFiles();
+    } catch (err: any) {
+      this.patch({ status: WorkerStatus.Errored });
+      logger.error(this.name, `Start failed: ${err.message}`);
+    }
   }
 
   // public async start(): Promise<void> {
@@ -558,8 +569,22 @@ export class Worker {
     return processStore.get(this.name)!;
   }
 
-  private patch(partial: Partial<ManagedProcess>): void {
+  private _patch(partial: Partial<ManagedProcess>): void {
     processStore.set(this.name, { ...this.mp(), ...partial });
+  }
+
+  private patch(partial: Partial<ManagedProcess>): void {
+    const current = this.mp();
+    
+    // If status is changing, log the transition automatically
+    if (partial.status && partial.status !== current.status) {
+      logger.info(
+        this.name, 
+        `[STATE] ${current.status} ➔ ${partial.status}${partial.isRestarting ? ' (Restarting)' : ''}`
+      );
+    }
+
+    processStore.set(this.name, { ...current, ...partial });
   }
 
   private clearTimers(): void {

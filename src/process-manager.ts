@@ -29,16 +29,19 @@ export class ProcessManager {
 
   public async stop(name: string): Promise<void> {
     const worker = this.require(name);
+    if ( !worker ) return;
     await worker.stop();
   }
 
   public async restart(name: string): Promise<void> {
     const worker = this.require(name);
+    if ( !worker ) return;
     await worker.restart();
   }
 
   public async delete(name: string): Promise<void> {
     const worker = this.require(name);
+    if ( !worker ) return;
     await worker.stop();
     this.workers.delete(name);
     processStore.delete(name);
@@ -50,6 +53,7 @@ export class ProcessManager {
   public async getStats(name?: string): Promise<WorkerStats[]> {
     if (name) {
       const worker = this.require(name);
+      if ( !worker ) return [];
       return [await worker.getStats()];
     }
     const all = await Promise.all(
@@ -72,16 +76,23 @@ export class ProcessManager {
 
   public getWorker(name: string): Worker | null {
     const worker = this.workers.get(name);
-    if (!worker) return null
+    if (!worker) {
+      logger.error(name, `Worker Not Found`)
+      return null
+    }
     return worker;
   }
 
 
   // Private
 
-  private require(name: string): Worker {
+  private require(name: string): Worker | null {
     const worker = this.workers.get(name);
-    if (!worker) throw new Error(`Worker "${name}" not found`);
+    if (!worker) {
+      logger.error(name, `Worker Not Found`)
+      // throw new Error(`Worker "${name}" not found`);
+      return null;
+    }
     return worker;
   }
 }
