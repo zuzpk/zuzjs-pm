@@ -89,6 +89,8 @@ export type IPCCommand =
   | { cmd: "stats";   name?: string }
   | { cmd: "list" }
   | { cmd: "ping" }
+  | { cmd: "find-worker"; name: string }
+  | { cmd: "add-worker"; autoStart: boolean, config: WorkerConfig }
   | { cmd: "logs"; name?: string }
   | { cmd: "get-store" };
 

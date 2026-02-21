@@ -137,8 +137,11 @@ export class Worker {
     this.initStore();
   }
 
-  // Public lifecycle
+  public getConfig(){
+    return this.cfg
+  }
 
+  // Public lifecycle
   public async start(): Promise<void> {
     const mp = this.mp();
     

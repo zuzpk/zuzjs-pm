@@ -27,6 +27,7 @@ import {
   WorkerConfig,
   WorkerStats,
 } from "./types";
+import { Worker } from "./worker";
 
 // Internal IPC transport
 
@@ -167,6 +168,34 @@ export class ZPMClient {
 
   public async delete(name: string): Promise<string> {
     return send({ cmd: "delete", name }, this.namespace) as Promise<string>;
+  }
+
+  /** Replace worker with new name */
+  public async replaceWorker(oldName: string, newName: string, autoStart: boolean){
+
+    const worker = await this.getWorkerByName(oldName)
+
+    if ( worker ){
+      
+      await this.stop(oldName)
+      await this.delete(oldName)
+
+      return await send({ 
+        cmd: `add-worker`, 
+        config: {
+          ...worker.getConfig(),
+          name: newName
+        },
+        autoStart
+      })
+      
+    }
+
+  }
+
+  public async getWorkerByName(workerName: string) : Promise<Worker | null> {
+    const worker = await send({ cmd: "find-worker", name: workerName }, this.namespace)
+    return worker as Worker | null
   }
 
   // Telemetry

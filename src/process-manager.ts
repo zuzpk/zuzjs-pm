@@ -105,6 +105,11 @@ export class ProcessManager {
     return worker;
   }
 
+  public async addWorker(config: WorkerConfig, autoStart: boolean): Promise<void> {
+    const worker = new Worker(config);
+    this.workers.set(config.name, worker);
+    if ( autoStart ) await worker.start();
+  }
 
   // Private
 

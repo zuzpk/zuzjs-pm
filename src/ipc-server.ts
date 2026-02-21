@@ -115,6 +115,15 @@ async function handleMessage(
         data = pm.list();
         break;
 
+      case "add-worker":
+        await pm.addWorker(cmd.config, cmd.autoStart);
+        data = `Added "${cmd.config.name}"`;
+        break;
+
+      case "find-worker":
+        data = pm.getWorker(cmd.name)
+        break;
+
       case "get-store": {
         // Returns all managed processes in the store
         data = Array.from(processStore.all()).map(([name, mp]) => ({
