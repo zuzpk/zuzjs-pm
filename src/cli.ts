@@ -263,8 +263,8 @@ program
   .description("Show raw internal store state for debugging")
   .action(async () => {
     const response = await client.getStore();
-    if ( response.ok ){
-      const data : any[] = response.data as any[]
+    if ( response ){
+      const data : any[] = response as any[]
       if (data.length === 0) {
         console.log(pc.yellow("Store is empty."));
         return;

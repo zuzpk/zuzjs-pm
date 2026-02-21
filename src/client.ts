@@ -22,6 +22,8 @@ import { logger } from "./logger";
 import {
   IPCCommand,
   IPCResponse,
+  ManagedProcess,
+  StoreInfo,
   WorkerConfig,
   WorkerStats,
 } from "./types";
@@ -139,8 +141,15 @@ export class ZPMClient {
     }
   }
 
-  public async getStore() : Promise<IPCResponse> {
-    return send({ cmd: "get-store" }, this.namespace) as Promise<IPCResponse>
+  public async getStore() : Promise<StoreInfo> {
+    const info : IPCResponse = (await send({ cmd: "get-store" }, this.namespace)) as IPCResponse
+    return info.ok == true ? info.data as ManagedProcess[] : null
+  }
+
+  public async getProcessByName(processName: string) : Promise<ManagedProcess | undefined> {
+    const info : IPCResponse = (await send({ cmd: "get-store" }, this.namespace)) as IPCResponse
+    const list : any[] = info.ok == true ? info.data as any[] : []
+    return list.find(p => p.name == processName)
   }
   // Worker control
 

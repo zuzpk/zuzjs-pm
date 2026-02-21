@@ -96,6 +96,7 @@ export type IPCResponse =
   | { ok: true;  data: unknown }
   | { ok: false; error: string };
 
+export type StoreInfo = ManagedProcess[] | null;
 export interface ManagedProcess {
   config: WorkerConfig;
   children: ChildProcess[];        // length > 1 only in Cluster mode
