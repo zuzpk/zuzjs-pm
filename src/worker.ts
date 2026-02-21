@@ -56,7 +56,7 @@ async function freePort(port: number): Promise<void> {
   await new Promise((r) => setTimeout(r, 500));
 }
 
-function gracefulKill(
+function _gracefulKill(
   proc: ChildProcess | ClusterWorker,
   timeout: number
 ): void {
@@ -72,6 +72,45 @@ function gracefulKill(
   // Clear killer if the process actually exits before timeout
   (proc as ChildProcess).once?.("exit", () => clearTimeout(killer));
   (proc as ClusterWorker).once?.("exit", () => clearTimeout(killer));
+}
+
+function gracefulKill(
+  proc: ChildProcess | ClusterWorker,
+  timeout: number
+): Promise<void> {
+  const pid = (proc as ClusterWorker).process?.pid ?? (proc as ChildProcess).pid;
+  if (!pid) return Promise.resolve();
+
+  return new Promise((resolve) => {
+    let resolved = false;
+
+    const done = () => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(killer);
+      resolve();
+    };
+
+    // Listen for exit from any source
+    (proc as ChildProcess).once?.("exit", done);
+    (proc as ClusterWorker).once?.("exit", done);
+
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch (e) {
+      return done(); // Already dead
+    }
+
+    const killer = setTimeout(() => {
+      try {
+        process.kill(pid, "SIGKILL");
+        // SIGKILL is immediate, but we give the OS a tiny slice to update the proc table
+        setTimeout(done, 50); 
+      } catch {
+        done();
+      }
+    }, timeout);
+  });
 }
 
 // Worker class
@@ -99,6 +138,33 @@ export class Worker {
   }
 
   public async stop(): Promise<void> {
+    
+    const mp = this.mp();
+
+    if (mp.status === WorkerStatus.Stopping) return;
+
+    logger.info(this.name, `Stopping...`);
+    this.patch({ status: WorkerStatus.Stopping, isRestarting: false });
+
+    this.clearTimers();
+    this.stopProbe();
+    this.stopWatcher();
+
+    await Promise.all(
+      mp.children.map(child => 
+        gracefulKill(child, this.cfg.killTimeout ?? DEFAULT_KILL_TIMEOUT)
+      )
+    );
+
+    // for (const child of mp.children) {
+    //   gracefulKill(child, this.cfg.killTimeout ?? DEFAULT_KILL_TIMEOUT);
+    // }
+
+    this.patch({ children: [], status: WorkerStatus.Stopped, startTime: null });
+    logger.info(this.name, "Stopped.");
+  }
+
+  public async _stop(): Promise<void> {
     const mp = this.mp();
     this.patch({ status: WorkerStatus.Stopping, isRestarting: false });
     this.clearTimers();
@@ -114,6 +180,31 @@ export class Worker {
   }
 
   public async restart(): Promise<void> {
+
+    const mp = this.mp();
+
+    if (mp.isRestarting) return;
+
+    logger.info(this.name, "Restarting...");
+    
+    this.patch({ isRestarting: true, status: WorkerStatus.Stopping });
+
+    this.clearTimers();
+    this.stopProbe();
+
+    await Promise.all(
+      mp.children.map(child => 
+        gracefulKill(child, this.cfg.killTimeout ?? DEFAULT_KILL_TIMEOUT)
+      )
+    );
+
+    // After all are dead, we trigger a fresh spawn
+    this.patch({ isRestarting: false, children: [] });
+    // await this.spawnAll();
+    // spawnAll is called from exit handler when isRestarting = true
+  }
+
+  public async _restart(): Promise<void> {
     logger.info(this.name, "Restarting...");
     const mp = this.mp();
     this.patch({ isRestarting: true });
@@ -214,7 +305,7 @@ export class Worker {
         executable, 
         args, 
         {
-          // stdio:    "inherit",
+          cwd: path.dirname(path.resolve(this.cfg.scriptPath, '..')), // Go up one level from dist
           stdio:    ["ignore", "pipe", "pipe"],
           env:      { ...process.env, ...(this.cfg.env ?? {}), NODE_ENV: this.cfg.devMode ? "development" : "production" },
           detached: false,
