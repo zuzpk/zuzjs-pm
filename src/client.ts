@@ -164,6 +164,13 @@ export class ZPMClient {
   }
 
   public async start(config: WorkerConfig): Promise<string> {
+    const worker = await this.getWorkerByName(config.name)
+    if ( worker ){
+      config = {
+        ...worker.getConfig(),
+        ...config,
+      }
+    }
     return send({ cmd: "start", name: config.name, config }, this.namespace) as Promise<string>;
   }
 
