@@ -248,6 +248,25 @@ program
     });
 });
 
+// START DAEMON
+program
+  .command("start-daemon")
+  .description("Start the background ZPM daemon")
+  .action(async () => {
+    await client.ensureDaemon();
+    console.log("\x1b[32m[ZPM]\x1b[0m Daemon started.");
+  });
+
+// START DAEMON
+program
+  .command("restart-daemon")
+  .description("Restart the background ZPM daemon")
+  .action(async () => {
+    await client.killDaemon();
+    await client.ensureDaemon();
+    console.log("\x1b[32m[ZPM]\x1b[0m Daemon started.");
+  });
+
 // KILL DAEMON
 program
   .command("kill-daemon")

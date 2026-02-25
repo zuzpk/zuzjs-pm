@@ -230,21 +230,25 @@ export class Worker {
 
   public async restart(): Promise<void> {
 
-    const mp = this.mp();
-    if (mp.isRestarting) return;
+    await this.stop();
+    await this.start();
 
-    logger.info(this.name, "Restarting..");
     
-    this.patch({ isRestarting: true, status: WorkerStatus.Starting });
+    // const mp = this.mp();
+    // if (mp.isRestarting) return;
 
-    this.clearTimers();
-    this.stopProbe();
+    // logger.info(this.name, "Restarting..");
+    
+    // this.patch({ isRestarting: true, status: WorkerStatus.Starting });
 
-    await Promise.all(
-      mp.children.map(child => 
-        gracefulKill(child, this.cfg.killTimeout ?? DEFAULT_KILL_TIMEOUT)
-      )
-    );
+    // this.clearTimers();
+    // this.stopProbe();
+
+    // await Promise.all(
+    //   mp.children.map(child => 
+    //     gracefulKill(child, this.cfg.killTimeout ?? DEFAULT_KILL_TIMEOUT)
+    //   )
+    // );
 
     // After all are dead, we trigger a fresh spawn
     // this.patch({ isRestarting: false, children: [] });
