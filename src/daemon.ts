@@ -40,28 +40,41 @@ function clearPid(): void {
 // On graceful shutdown we write a JSON snapshot of running workers so they can
 // be re-spawned automatically on the next daemon start.
 
-const SNAPSHOT_FILE = path.join(os.tmpdir(), "zuz-pm.snapshot.json");
-
-function saveSnapshot(pm: ProcessManager): void {
-  try {
-    const list = pm.list();
-    fs.writeFileSync(SNAPSHOT_FILE, JSON.stringify(list, null, 2));
-  } catch { /* non-critical */ }
-}
-
 // Boot
-
 async function main(): Promise<void> {
+
   logger.success("daemon", `Booting ZPM daemon (PID ${process.pid})`);
   writePid();
 
-  const pm     = new ProcessManager();
-  const server = startIPCServer(pm);
+  const pm      = new ProcessManager();
+  const server  = startIPCServer(pm);
+
+  if (fs.existsSync(pm.SNAPSHOT_FILE)) {
+    try {
+      const raw = fs.readFileSync(pm.SNAPSHOT_FILE, "utf-8");
+      const savedConfigs = JSON.parse(raw);
+
+      if (Array.isArray(savedConfigs) && savedConfigs.length > 0) {
+
+        logger.info("daemon", `Restoring ${savedConfigs.length} workers from snapshot...`);
+        
+        for (const config of savedConfigs) {
+          // Check if it's already running (unlikely on fresh boot but safe)
+          // We use start() because it handles spawning and status updates
+          pm.start(config).catch(err => {
+            logger.error("daemon", `Failed to restore worker "${config.name}":`, err.message);
+          });
+        }
+      }
+    } catch (err: any) {
+      logger.error("daemon", "Snapshot restoration failed:", err.message);
+    }
+  }
 
   // Graceful shutdown
   async function shutdown(signal: string): Promise<void> {
     logger.info("daemon", `Received ${signal} – shutting down…`);
-    saveSnapshot(pm);
+    pm.saveSnapshot();
     server.close();
     await pm.stopAll();
     clearPid();
