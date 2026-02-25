@@ -231,12 +231,11 @@ export class Worker {
   public async restart(): Promise<void> {
 
     const mp = this.mp();
-
     if (mp.isRestarting) return;
 
-    logger.info(this.name, "Restarting...");
+    logger.info(this.name, "Restarting..");
     
-    this.patch({ isRestarting: true, status: WorkerStatus.Stopping });
+    this.patch({ isRestarting: true, status: WorkerStatus.Starting });
 
     this.clearTimers();
     this.stopProbe();
@@ -248,7 +247,7 @@ export class Worker {
     );
 
     // After all are dead, we trigger a fresh spawn
-    this.patch({ isRestarting: false, children: [] });
+    // this.patch({ isRestarting: false, children: [] });
     // await this.spawnAll();
     // spawnAll is called from exit handler when isRestarting = true
   }
@@ -447,24 +446,39 @@ export class Worker {
     signal: NodeJS.Signals | null,
     uptime: number
   ): void {
+
     const mp = this.mp();
 
     // Remove this child from the active list
     const remaining = mp.children.filter((c) => c !== child);
     this.patch({ children: remaining });
 
-    if (mp.status === WorkerStatus.Stopping) return; // intentional stop
-
-    logger.warn(this.name, `Process exited (code=${code}, signal=${signal}, uptime=${uptime}ms)`);
-
     if (mp.isRestarting) {
       // All children need to be gone before we re-spawn
       if (remaining.length === 0) {
+        logger.info(this.name, "All instances stopped. Spawning new ones...");
         this.patch({ isRestarting: false });
         this.spawnAll();
       }
+      else{
+        logger.info(this.name, `Restart in progress... waiting for ${remaining.length} instance(s) to stop.`);
+      }
       return;
     }
+    
+    if (mp.status === WorkerStatus.Stopping) {
+      if (remaining.length === 0) {
+        logger.info(this.name, "All instances dead. Spawning new ones...");
+        this.patch({ isRestarting: false });
+        this.spawnAll();
+      }
+      else{
+        logger.info(this.name, `Stop in progress... waiting for ${remaining.length} instance(s) to stop.`);
+      }
+      return; 
+    }
+
+    logger.warn(this.name, `Process exited (code=${code}, signal=${signal}, uptime=${uptime}ms)`);
 
     if (code !== 0 && code !== null) {
       this.patch({ status: WorkerStatus.Crashed });
