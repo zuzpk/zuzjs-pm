@@ -165,7 +165,6 @@ export class ZPMClient {
 
   public async start(config: WorkerConfig): Promise<string> {
     const worker = await this.getWorkerByName(config.name)
-    console.log(worker)
     if ( worker ){
       config = {
         ...worker.getConfig(),

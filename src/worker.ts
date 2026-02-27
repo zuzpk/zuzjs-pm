@@ -6,7 +6,7 @@
  */
 
 import chokidar, { FSWatcher } from "chokidar";
-import { ChildProcess, exec, spawn } from "node:child_process";
+import { ChildProcess, exec, execSync, spawn } from "node:child_process";
 import { Worker as ClusterWorker } from "node:cluster";
 import fs from "node:fs";
 import net from "node:net";
@@ -21,6 +21,7 @@ import { logger } from "./logger";
 import { runProbe } from "./probe";
 import { processStore } from "./store";
 import {
+  dynamic,
   ManagedProcess,
   WorkerConfig,
   WorkerMode,
@@ -364,10 +365,7 @@ export class Worker {
           : process.cwd();
       }
 
-      const child = spawn(
-        executable,
-        args,
-        {
+      const spawnOptions : dynamic = {
           cwd,
           stdio: ["ignore", "pipe", "pipe"],
           env: { 
@@ -380,7 +378,28 @@ export class Worker {
           detached: false,
           // Set shell to true for non-JS commands to support pipes/redirection if needed
           shell: !isJs, 
+      }
+
+      // DROP PRIVILEGES LOGIC
+      if (process.getuid && process.getuid() === 0 && this.cfg.user) {
+        try {
+          // Resolve username to UID/GID (CentOS/Linux specific)
+          const uid = parseInt(execSync(`id -u ${this.cfg.user}`).toString().trim());
+          const gid = parseInt(execSync(`id -g ${this.cfg.user}`).toString().trim());
+          
+          spawnOptions.uid = uid;
+          spawnOptions.gid = gid;
+          
+          logger.info(this.name, `Setting privileges to user: ${this.cfg.user} (uid: ${uid})`);
+        } catch (e) {
+          logger.error(this.name, `Failed to resolve user "${this.cfg.user}". Running as root!`);
         }
+      }
+
+      const child = spawn(
+        executable,
+        args,
+        spawnOptions
       );
 
       this.setupLogging(child);

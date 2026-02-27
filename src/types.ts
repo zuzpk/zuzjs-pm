@@ -23,6 +23,10 @@ export interface WorkerConfig {
   name: string;
   /** Absolute path to the entry script */
   scriptPath: string;
+  /** User */
+  user?: string;  // e.g., "user-a"
+  uid?: number;   // Optional: numeric user id
+  gid?: number;
   /** CLI arguments forwarded to the child */
   args?: string[];
   /** Extra environment variables merged on top of process.env */
