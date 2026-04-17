@@ -94,7 +94,8 @@ program
   .option("-c, --cluster", "Use cluster mode instead of fork", false)
   .option("--ws <url>", "WebSocket URL to stream logs (e.g. for ZPanel)", "http://127.0.0.1:2082/_/wss/zpm")
   .option("--save-logs", "Save logs to a local file", false)
-  .option("--args <string>", "Arguments to pass to the script (e.g. \"dev -p 3000\")")
+  .option("--arg <string>", "Arguments to pass to the executable (e.g. \"run start -p 3000\")")
+  .option("--args <string>", "Alias for --arg")
   .option("--probe-type <type>", "Type of probe: http, tcp, or exec")
   .option("--probe-target <target>", "URL, host:port, or command")
   .option("--probe-interval <sec>", "Seconds between probes", parseInt, 30)
@@ -102,7 +103,15 @@ program
   .action(async (script, options) => {
     try {
       await client.ensureDaemon();
-      const scriptPath = path.resolve(process.cwd(), script);
+      const isPathLike =
+        path.isAbsolute(script) ||
+        script.startsWith(".") ||
+        script.includes("/") ||
+        script.includes("\\");
+
+      // Keep bare commands (e.g. "next", "tsx", "python") untouched so
+      // they can be resolved from PATH/node_modules/.bin at runtime.
+      const scriptPath = isPathLike ? path.resolve(process.cwd(), script) : script;
       const processName = options.name ?? path.basename(script);
 
       const msg = await client.start({
@@ -112,7 +121,7 @@ program
         instances: options.instances,
         devMode: options.dev,
         mode: options.cluster ? WorkerMode.Cluster : WorkerMode.Fork,
-        args: options.args ? options.args.split(" ") : [],
+        args: (options.arg ?? options.args) ? (options.arg ?? options.args).split(" ") : [],
         reloadCommand: options.reloadCmd,
         user: options.user,
         probe: options.probeTarget ? {

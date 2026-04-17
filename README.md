@@ -57,6 +57,49 @@ zpm delete  api
 zpm kill-daemon
 ```
 
+### `zpm start` patterns
+
+`zpm start <script>` accepts either:
+
+- a JavaScript file path (runs with Node), or
+- a non-JS executable/command (runs directly, with `--args` forwarded).
+
+Examples:
+
+```bash
+# 1) Raw Node.js script (compiled output)
+zpm start ./dist/server.js --name api --port 3000
+
+# 2) Raw Node.js script with args
+zpm start ./dist/worker.js --name worker --args "--queue emails --concurrency 4"
+
+# 3) Next.js app via package manager (like pm2's `pm2 start npm -- run start`)
+# Run from your Next.js project root.
+zpm start pnpm --name "next-app" --arg="run start -p 3000"
+zpm start npm  --name "next-app" --arg="run start -p 3000"
+
+# Or invoke next directly:
+zpm start next --name "next-app" --arg="start -p 3000"
+
+# 4) Next.js custom server entry
+zpm start ./server.js --name web --port 3000
+
+# 5) Rust binary (cargo build --release output)
+zpm start ./target/release/my-app --name rust-api --port 8080
+
+# 6) Any custom executable/app
+zpm start ./bin/custom-app --name custom --args "--env production --verbose"
+```
+
+Notes:
+
+- Use an absolute or relative path for built binaries (for example, Rust in `./target/release/...`).
+- For custom binaries, ensure execute permission is set:
+
+```bash
+chmod +x ./target/release/my-app
+```
+
 ---
 
 ## Programmatic API

@@ -376,8 +376,9 @@ export class Worker {
             PATH: `${path.resolve(process.cwd(), 'node_modules/.bin')}${path.delimiter}${process.env.PATH}`
           },
           detached: false,
-          // Set shell to true for non-JS commands to support pipes/redirection if needed
-          shell: !isJs, 
+          // shell: false so args are forwarded directly to the executable.
+          // Node resolves bare command names (pnpm, npm, next) from PATH automatically.
+          shell: false,
       }
 
       // DROP PRIVILEGES LOGIC
