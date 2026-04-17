@@ -172,7 +172,7 @@ export class Worker {
       await this.spawnAll();
       if (this.cfg.devMode) this.watchFiles();
     } catch (err: any) {
-      this.patch({ status: WorkerStatus.Errored });
+      this.patch({ status: WorkerStatus.Errored, lastError: err.message });
       logger.error(this.name, `Start failed: ${err.message}`);
     }
   }
@@ -304,6 +304,23 @@ export class Worker {
       return;
     }
 
+    // For bare commands (pnpm, npm, next, …) verify they are resolvable from PATH
+    // before attempting to spawn, so we get a clear synchronous error on Linux.
+    if (isBareCommand) {
+      const whichCmd = os.platform() === "win32" ? "where" : "which";
+      try {
+        execSync(`${whichCmd} ${this.cfg.scriptPath}`, { stdio: "ignore" });
+      } catch {
+        const msg =
+          `Command not found: "${this.cfg.scriptPath}". ` +
+          `Make sure it is installed and available in PATH. ` +
+          `(PATH: ${process.env.PATH})`;
+        logger.error(this.name, msg);
+        this.patch({ status: WorkerStatus.Errored, lastError: msg });
+        return;
+      }
+    }
+
     if (this.cfg.port) await freePort(this.cfg.port);
 
     const mode      = this.cfg.mode ?? WorkerMode.Fork;
@@ -381,8 +398,19 @@ export class Worker {
             ...process.env, 
             ...(this.cfg.env ?? {}), 
             NODE_ENV: this.cfg.devMode ? "development" : "production",
-            // Add local node_modules/.bin to path so local binaries (next, tsc…) are found
-            PATH: `${path.resolve(cwd, 'node_modules/.bin')}${path.delimiter}${process.env.PATH}`
+            // Add local node_modules/.bin and common package manager bin dirs to
+            // PATH so binaries like next, pnpm, npm are found on all platforms.
+            PATH: [
+              path.resolve(cwd, "node_modules/.bin"),
+              // Common pnpm install locations on Linux
+              ...(os.platform() !== "win32" ? [
+                path.join(os.homedir(), ".local", "share", "pnpm"),
+                path.join(os.homedir(), ".pnpm"),
+                "/usr/local/bin",
+                "/usr/bin",
+              ] : []),
+              process.env.PATH,
+            ].filter(Boolean).join(path.delimiter),
           },
           detached: false,
           // shell: false so args are forwarded directly to the executable.
