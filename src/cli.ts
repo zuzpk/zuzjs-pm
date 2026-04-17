@@ -85,6 +85,7 @@ program
   .command("start <script>")
   .description("Start a new process")
   .option("-n, --name <name>", "Unique name for the process")
+  .option("--cwd <dir>", "Working directory for the process (can be relative, e.g. ..)")
   .option("-p, --port <port>", "Port the app listens on", parseInt)
   .option("-i, --instances <number>", "Number of instances (cluster mode)", parseInt, 1)
   
@@ -103,6 +104,15 @@ program
   .action(async (script, options) => {
     try {
       await client.ensureDaemon();
+
+      const resolvedCwd = options.cwd
+        ? path.resolve(process.cwd(), options.cwd)
+        : process.cwd();
+
+      if (!fs.existsSync(resolvedCwd) || !fs.statSync(resolvedCwd).isDirectory()) {
+        throw new Error(`Invalid cwd: ${resolvedCwd}`);
+      }
+
       const isPathLike =
         path.isAbsolute(script) ||
         script.startsWith(".") ||
@@ -111,13 +121,13 @@ program
 
       // Keep bare commands (e.g. "next", "tsx", "python") untouched so
       // they can be resolved from PATH/node_modules/.bin at runtime.
-      const scriptPath = isPathLike ? path.resolve(process.cwd(), script) : script;
+      const scriptPath = isPathLike ? path.resolve(resolvedCwd, script) : script;
       const processName = options.name ?? path.basename(script);
 
       const msg = await client.start({
         name: options.name ?? path.basename(script),
         scriptPath,
-        cwd: process.cwd(),
+        cwd: resolvedCwd,
         port: options.port,
         instances: options.instances,
         devMode: options.dev,

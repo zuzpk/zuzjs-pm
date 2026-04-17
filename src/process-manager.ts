@@ -37,9 +37,13 @@ export class ProcessManager {
         state?.status === WorkerStatus.Crashed || 
         state?.status === WorkerStatus.Errored
       ) {
-        
-        logger.info("ZPM", `Resuming existing worker "${config.name}"`);
-        await _worker.start();
+        logger.info("ZPM", `Refreshing worker "${config.name}" with latest config`);
+        await _worker.stop();
+
+        const worker = new Worker(config);
+        this.workers.set(config.name, worker);
+        await worker.start();
+        this.saveSnapshot();
         return;
       }
 

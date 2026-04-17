@@ -78,6 +78,10 @@ zpm start ./dist/worker.js --name worker --args "--queue emails --concurrency 4"
 zpm start pnpm --name "next-app" --arg="run start -p 3000"
 zpm start npm  --name "next-app" --arg="run start -p 3000"
 
+# Run from a different directory by setting cwd explicitly.
+zpm start pnpm --name "next-app" --cwd ../zuflare-web --arg="run start"
+zpm start pnpm --name "next-app" --cwd /home/zuzflare/zuflare-web --arg="run start"
+
 # Or invoke next directly:
 zpm start next --name "next-app" --arg="start -p 3000"
 

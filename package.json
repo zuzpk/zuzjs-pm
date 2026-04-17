@@ -1,6 +1,6 @@
 {
   "name": "@zuzjs/pm",
-  "version": "0.0.33",
+  "version": "0.0.34",
   "keywords": [
     "core",
     "zuz",
@@ -60,6 +60,7 @@
     "@types/node": "^25.3.0",
     "@types/pidusage": "^2.0.5",
     "husky": "^9.1.7",
+    "npm-run-all": "^4.1.5",
     "tsup": "^8.5.1",
     "typescript": "^5.9.3"
   }
