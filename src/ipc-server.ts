@@ -121,7 +121,7 @@ async function handleMessage(
         break;
 
       case "find-worker":
-        data = pm.getWorker(cmd.name)
+        data = pm.getWorker(cmd.name)?.getConfig() ?? null
         break;
 
       case "get-store": {

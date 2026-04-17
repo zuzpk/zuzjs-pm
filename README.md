@@ -73,7 +73,7 @@ zpm start ./dist/server.js --name api --port 3000
 # 2) Raw Node.js script with args
 zpm start ./dist/worker.js --name worker --args "--queue emails --concurrency 4"
 
-# 3) Next.js app via package manager (like pm2's `pm2 start npm -- run start`)
+# 3) Next.js app via package manager
 # Run from your Next.js project root.
 zpm start pnpm --name "next-app" --arg="run start -p 3000"
 zpm start npm  --name "next-app" --arg="run start -p 3000"

@@ -57,6 +57,12 @@ export interface WorkerConfig {
    * e.g., "npm run build" or "tsc && tsc-alias"
   */
   reloadCommand?: string;
+  /** Working directory for the spawned process.
+   * Defaults to the daemon's cwd if not set.
+   * Always pass process.cwd() from the CLI so bare commands like pnpm/npm
+   * run inside the user's project directory.
+   */
+  cwd?: string;
 }
 
 export interface LivenessProbeConfig {
@@ -83,6 +89,8 @@ export interface WorkerStats {
   memoryHeap: number | null;  // bytes (JS heap, if available)
   mode: WorkerMode;
   instances: number;
+  lastError: string | null;   // last spawn error or non-zero exit reason
+  lastExitCode: number | null;
 }
 
 export type IPCCommand =
@@ -116,4 +124,5 @@ export interface ManagedProcess {
   probeFailures: number;
   isRestarting: boolean;
   lastError?: string;
+  lastExitCode?: number | null;
 }

@@ -155,19 +155,19 @@ export class ZPMClient {
   // Worker control
 
   public async startWorker(name: string): Promise<string> {
-    const worker = await this.getWorkerByName(name)
-    if ( worker ){
-      return this.start(worker.getConfig())
+    const config = await this.getWorkerByName(name)
+    if ( config ){
+      return this.start(config)
     }
     logger.info(name, `Worker ${name} not found`)
     return `Worker ${name} not found`
   }
 
   public async start(config: WorkerConfig): Promise<string> {
-    const worker = await this.getWorkerByName(config.name)
-    if ( worker ){
+    const existing = await this.getWorkerByName(config.name)
+    if ( existing ){
       config = {
-        ...worker.getConfig(),
+        ...existing,
         ...config,
       }
     }
@@ -189,9 +189,9 @@ export class ZPMClient {
   /** Replace worker with new name */
   public async replaceWorker(oldName: string, newName: string, autoStart: boolean){
 
-    const worker = await this.getWorkerByName(oldName)
+    const workerConfig = await this.getWorkerByName(oldName)
 
-    if ( worker ){
+    if ( workerConfig ){
       
       await this.stop(oldName)
       await this.delete(oldName)
@@ -199,7 +199,7 @@ export class ZPMClient {
       return await send({ 
         cmd: `add-worker`, 
         config: {
-          ...worker.getConfig(),
+          ...workerConfig,
           name: newName
         },
         autoStart
@@ -209,9 +209,9 @@ export class ZPMClient {
 
   }
 
-  public async getWorkerByName(workerName: string) : Promise<Worker | null> {
-    const worker = await send({ cmd: "find-worker", name: workerName }, this.namespace)
-    return worker as Worker | null
+  public async getWorkerByName(workerName: string) : Promise<WorkerConfig | null> {
+    const config = await send({ cmd: "find-worker", name: workerName }, this.namespace)
+    return config as WorkerConfig | null
   }
 
   // Telemetry

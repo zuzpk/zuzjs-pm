@@ -117,6 +117,7 @@ program
       const msg = await client.start({
         name: options.name ?? path.basename(script),
         scriptPath,
+        cwd: process.cwd(),
         port: options.port,
         instances: options.instances,
         devMode: options.dev,
@@ -231,15 +232,20 @@ program
     
     stats.forEach(s => {
       const uptime = s.uptime ? `${Math.round(s.uptime / 1000)}s` : "0s";
-      const statusColor = s.status === "running" ? "\x1b[32m" : "\x1b[31m";
+      const isOk = s.status === "running";
+      const statusColor = isOk ? "\x1b[32m" : "\x1b[31m";
       console.log(
         `${statusColor}[${s.status.toUpperCase()}]\x1b[0m ` +
         `\x1b[1m${s.name.padEnd(15)}\x1b[0m ` +
         `PID: ${String(s.pid ?? "N/A").padEnd(6)} ` +
         `CPU: ${String(s.cpu ?? 0).padStart(3)}% ` +
         `MEM: ${Math.round((s.memoryRss ?? 0) / 1024 / 1024)}MB ` +
-        `Uptime: ${uptime}`
+        `Uptime: ${uptime} ` +
+        `Restarts: ${s.restartCount}`
       );
+      if (!isOk && s.lastError) {
+        console.log(`  ${"\x1b[31m"}↳ ${s.lastError}${"\x1b[0m"}`);
+      }
     });
   });
 

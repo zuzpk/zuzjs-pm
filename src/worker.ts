@@ -283,15 +283,24 @@ export class Worker {
       memoryHeap,
       mode:         this.cfg.mode ?? WorkerMode.Fork,
       instances:    mp.children.length,
+      lastError:    mp.lastError ?? null,
+      lastExitCode: mp.lastExitCode ?? null,
     };
   }
 
   // Internal spawn logic
 
   private async spawnAll(): Promise<void> {
-    if (!fs.existsSync(this.cfg.scriptPath)) {
-      logger.error(this.name, `Script not found: ${this.cfg.scriptPath}. Waiting for build...`);
-      this.patch({ status: WorkerStatus.Errored });
+    const isBareCommand =
+      !path.isAbsolute(this.cfg.scriptPath) &&
+      !this.cfg.scriptPath.startsWith(".") &&
+      !this.cfg.scriptPath.includes("/") &&
+      !this.cfg.scriptPath.includes("\\");
+
+    if (!isBareCommand && !fs.existsSync(this.cfg.scriptPath)) {
+      const msg = `Script not found: ${this.cfg.scriptPath}. Waiting for build...`;
+      logger.error(this.name, msg);
+      this.patch({ status: WorkerStatus.Errored, lastError: msg });
       return;
     }
 
@@ -355,14 +364,14 @@ export class Worker {
         // Your existing logic: Go up one level from dist
         cwd = path.dirname(path.resolve(this.cfg.scriptPath, '..'));
       } else {
-        // Scenario B: Global command (tsc, ls, etc.)
+        // Scenario B: Global command (pnpm, npm, next, tsc, custom binary …)
         executable = this.cfg.scriptPath;
         args = [...(this.cfg.args ?? [])];
-        
-        // For global commands, use current working directory or the directory of the command if absolute
-        cwd = isAbsolute 
-          ? path.dirname(this.cfg.scriptPath) 
-          : process.cwd();
+
+        // Prefer the cwd captured at CLI invocation time (i.e. the user's project
+        // directory).  Fall back to the absolute-binary directory or daemon cwd.
+        cwd = this.cfg.cwd
+          ?? (isAbsolute ? path.dirname(this.cfg.scriptPath) : process.cwd());
       }
 
       const spawnOptions : dynamic = {
@@ -372,8 +381,8 @@ export class Worker {
             ...process.env, 
             ...(this.cfg.env ?? {}), 
             NODE_ENV: this.cfg.devMode ? "development" : "production",
-            // Add local node_modules/.bin to path so 'tsc' can be found even if not global
-            PATH: `${path.resolve(process.cwd(), 'node_modules/.bin')}${path.delimiter}${process.env.PATH}`
+            // Add local node_modules/.bin to path so local binaries (next, tsc…) are found
+            PATH: `${path.resolve(cwd, 'node_modules/.bin')}${path.delimiter}${process.env.PATH}`
           },
           detached: false,
           // shell: false so args are forwarded directly to the executable.
@@ -408,7 +417,9 @@ export class Worker {
       const startTime = Date.now();
 
       child.on("error", (err) => {
-        logger.error(this.name, `Spawn error (${executable}):`, err.message);
+        const msg = `Spawn error: ${err.message} (executable: ${executable}, cwd: ${cwd})`;
+        logger.error(this.name, msg);
+        this.patch({ lastError: msg, status: WorkerStatus.Errored });
       });
 
       child.on("exit", (code, signal) => {
@@ -505,16 +516,13 @@ export class Worker {
     logger.warn(this.name, `Process exited (code=${code}, signal=${signal}, uptime=${uptime}ms)`);
 
     if (code !== 0 && code !== null) {
-      this.patch({ status: WorkerStatus.Crashed });
+      const exitMsg = uptime < 1_500
+        ? `Immediate crash (exit ${code}, uptime ${uptime}ms) – check cwd, command, and args`
+        : `Exited with code ${code} after ${uptime}ms`;
 
-      if (uptime < 1_500) {
-        logger.error(
-          this.name,
-          `Immediate crash (${uptime}ms) – likely a syntax/build error. Waiting for next file change.`
-        );
-        // return;
-      }
+      this.patch({ status: WorkerStatus.Crashed, lastError: exitMsg, lastExitCode: code });
 
+      logger.error(this.name, exitMsg);
       this.scheduleRestart();
     }
   }
