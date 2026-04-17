@@ -125,6 +125,24 @@ async function gracefulKill(
   });
 }
 
+/** Build an augmented PATH that includes common package-manager bin dirs.
+ * Used both for the `which` pre-check and for child process env. */
+function buildAugmentedPath(cwd: string): string {
+  return [
+    path.resolve(cwd, "node_modules/.bin"),
+    // Common pnpm install paths on Linux / macOS
+    ...(os.platform() !== "win32" ? [
+      path.join(os.homedir(), ".local", "share", "pnpm"),
+      path.join(os.homedir(), ".pnpm"),
+      path.join(os.homedir(), ".nvm", "versions", "node", process.versions.node, "bin"),
+      "/usr/local/bin",
+      "/usr/bin",
+      "/bin",
+    ] : []),
+    process.env.PATH ?? "",
+  ].filter(Boolean).join(path.delimiter);
+}
+
 // Worker class
 export class Worker {
   private readonly cfg: WorkerConfig;
@@ -304,17 +322,24 @@ export class Worker {
       return;
     }
 
-    // For bare commands (pnpm, npm, next, …) verify they are resolvable from PATH
-    // before attempting to spawn, so we get a clear synchronous error on Linux.
+    // For bare commands (pnpm, npm, next, …) verify they are resolvable.
+    // Use the same augmented PATH that will be given to the child process so
+    // tools installed via pnpm's own installer (e.g. ~/.local/share/pnpm) are
+    // found even when the daemon was spawned with a minimal system PATH.
     if (isBareCommand) {
+      const cwd = this.cfg.cwd ?? process.cwd();
+      const augPath = buildAugmentedPath(cwd);
       const whichCmd = os.platform() === "win32" ? "where" : "which";
       try {
-        execSync(`${whichCmd} ${this.cfg.scriptPath}`, { stdio: "ignore" });
+        execSync(`${whichCmd} ${this.cfg.scriptPath}`, {
+          stdio: "ignore",
+          env: { ...process.env, PATH: augPath },
+        });
       } catch {
         const msg =
           `Command not found: "${this.cfg.scriptPath}". ` +
           `Make sure it is installed and available in PATH. ` +
-          `(PATH: ${process.env.PATH})`;
+          `Searched: ${augPath}`;
         logger.error(this.name, msg);
         this.patch({ status: WorkerStatus.Errored, lastError: msg });
         return;
@@ -398,19 +423,7 @@ export class Worker {
             ...process.env, 
             ...(this.cfg.env ?? {}), 
             NODE_ENV: this.cfg.devMode ? "development" : "production",
-            // Add local node_modules/.bin and common package manager bin dirs to
-            // PATH so binaries like next, pnpm, npm are found on all platforms.
-            PATH: [
-              path.resolve(cwd, "node_modules/.bin"),
-              // Common pnpm install locations on Linux
-              ...(os.platform() !== "win32" ? [
-                path.join(os.homedir(), ".local", "share", "pnpm"),
-                path.join(os.homedir(), ".pnpm"),
-                "/usr/local/bin",
-                "/usr/bin",
-              ] : []),
-              process.env.PATH,
-            ].filter(Boolean).join(path.delimiter),
+            PATH: buildAugmentedPath(cwd),
           },
           detached: false,
           // shell: false so args are forwarded directly to the executable.
