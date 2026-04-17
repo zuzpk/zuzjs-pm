@@ -34,6 +34,7 @@ const DEFAULT_KILL_TIMEOUT = 5_000;   // ms before SIGKILL
 const DEFAULT_MAX_BACKOFF  = 16_000;  // ms
 const INIT_BACKOFF         = 1_000;   // ms
 const STABILITY_WINDOW     = 5_000;   // ms uptime before backoff resets
+const MAX_LOG_HISTORY      = 500;     // recent log chunks kept in memory
 
 // Helpers
 async function isPortFree(port: number): Promise<boolean> {
@@ -724,6 +725,7 @@ export class Worker {
     processStore.set(this.name, {
       config:        this.cfg,
       children:      [],
+      logHistory:    [],
       status:        WorkerStatus.Stopped,
       startTime:     null,
       restartCount:  0,
@@ -782,6 +784,14 @@ export class Worker {
 
     const handleData = (data: Buffer) => {
       const message = data.toString();
+      const current = this.mp();
+      const nextHistory = [...current.logHistory, message];
+
+      this.patch({
+        logHistory: nextHistory.length > MAX_LOG_HISTORY
+          ? nextHistory.slice(nextHistory.length - MAX_LOG_HISTORY)
+          : nextHistory,
+      });
       
       // 1. Print to local terminal if in dev mode
       if (this.cfg.devMode) process.stdout.write(`[${this.name}] ${message}`);

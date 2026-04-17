@@ -168,6 +168,19 @@ async function handleMessage(
           // Create a registry for cleanup
           const activeListeners: Array<{ child: any; onData: (d: Buffer) => void }> = [];
 
+          // Emit buffered history first so users can inspect recent crash output.
+          for (const worker of workersToStream) {
+            const mp = worker.mp();
+            const prefix = targetName ? "" : `[${worker.name}] `;
+
+            for (const chunk of mp.logHistory) {
+              socket.write(JSON.stringify({
+                ok: true,
+                data: `${prefix}${chunk}`,
+              }) + "\n");
+            }
+          }
+
           // Attach listeners to each worker
           for (const worker of workersToStream) {
             const mp = worker.mp();
@@ -195,8 +208,9 @@ async function handleMessage(
               child.stderr?.off("data", onData);
             }
           });
-          
-        break;
+
+          // Keep socket open for live stream; do not send one-off reply payload.
+          return;
 
       default:
           logger.error(`ZPM`, `Unknown command: ${(cmd as IPCCommand).cmd}`)

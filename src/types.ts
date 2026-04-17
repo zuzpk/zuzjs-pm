@@ -114,6 +114,7 @@ export type StoreInfo = ManagedProcess[] | null;
 export interface ManagedProcess {
   config: WorkerConfig;
   children: ChildProcess[];        // length > 1 only in Cluster mode
+  logHistory: string[];
   status: WorkerStatus;
   startTime: number | null;
   restartCount: number;

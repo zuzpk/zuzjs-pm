@@ -55,6 +55,11 @@ zpm delete  api
 
 # Daemon
 zpm kill-daemon
+
+# Logs
+# Prints recent buffered logs first, then continues streaming live output.
+zpm logs
+zpm logs api
 ```
 
 ### `zpm start` patterns
