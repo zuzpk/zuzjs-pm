@@ -57,6 +57,17 @@ zpm delete  api
 # Daemon
 zpm kill-daemon
 
+# Namespace (optional but recommended for isolated environments)
+zpm --namespace local-debug start pnpm --name app --arg="run start"
+zpm --namespace local-debug stats app
+zpm --namespace local-debug logs app
+zpm --namespace local-debug kill-daemon
+
+# Or set once per shell session
+export ZPM_NAMESPACE=local-debug
+zpm start pnpm --name app --arg="run start"
+zpm stats app
+
 # Logs
 # Prints recent buffered logs first, then continues streaming live output.
 zpm logs

@@ -27,7 +27,7 @@ import { WorkerMode } from "./types";
 const program = new Command();
 
 program
-.option("-s, --namespace <name>", "Internal daemon namespace", "zuz-pm");
+.option("-s, --namespace <name>", "Internal daemon namespace", process.env.ZPM_NAMESPACE ?? "zuz-pm");
 
 program.parseOptions(process.argv);
 
@@ -452,7 +452,13 @@ program
   .command("restart-daemon")
   .description("Restart the background ZPM daemon")
   .action(async () => {
-    await client.killDaemon();
+    try {
+      await client.killDaemon();
+    } catch (err: any) {
+      if (!String(err?.message ?? "").includes("PID file")) {
+        throw err;
+      }
+    }
     await client.ensureDaemon();
     console.log("\x1b[32m[ZPM]\x1b[0m Daemon started.");
   });
@@ -462,8 +468,12 @@ program
   .command("kill-daemon")
   .description("Stop the background ZPM daemon")
   .action(async () => {
-    await client.killDaemon();
-    console.log("\x1b[33mDaemon killed.\x1b[0m");
+    try {
+      await client.killDaemon();
+      console.log("\x1b[33mDaemon killed.\x1b[0m");
+    } catch (err: any) {
+      console.error(`\x1b[31m[Error]\x1b[0m ${err.message}`);
+    }
   });
 
 

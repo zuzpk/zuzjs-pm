@@ -132,14 +132,31 @@ export class ZPMClient {
       throw new Error("Daemon PID file not found – is the daemon running?");
     }
     const pid = Number(fs.readFileSync(pidFile, "utf8").trim());
+    if (!Number.isFinite(pid) || pid <= 0) {
+      try {
+        fs.unlinkSync(pidFile);
+      } catch {
+        // ignore unlink issues for malformed pid files
+      }
+      throw new Error("Daemon PID file is invalid and was cleaned up.");
+    }
+
     try {
       process.kill(pid, "SIGTERM");
       console.log(`[ZPM] Sent SIGTERM to daemon (PID ${pid})`);
-    } catch (err) {
-      throw new Error(`Failed to kill daemon: ${(err as Error).message}`);
+    } catch (err: any) {
+      if (err?.code === "ESRCH") {
+        console.log(`[ZPM] Daemon PID ${pid} is not running (stale pid file). Cleaning up.`);
+      } else {
+        throw new Error(`Failed to kill daemon: ${err.message}`);
+      }
     }
     finally {
-      fs.unlinkSync(pidFile)
+      try {
+        fs.unlinkSync(pidFile)
+      } catch {
+        // best effort cleanup
+      }
     }
   }
 
