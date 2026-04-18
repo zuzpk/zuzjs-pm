@@ -185,6 +185,7 @@ Daemon notes:
 - `zpm restart-daemon` performs a deep restart flow: resolves daemon PID from PID file or socket owner, stops it, cleans stale pid/socket artifacts, and starts a fresh daemon.
 - If the daemon socket is owned by another user (for example root), restart may require `sudo` to terminate that process.
 - `zpm doctor` now reports socket owner uid and hints when sudo may be required for daemon lifecycle operations.
+- Daemon stdio is detached by default (so it does not keep writing logs into your terminal after `Ctrl+C`). For interactive daemon debugging only, set `ZPM_DAEMON_STDIO=inherit` before running a command.
 
 ---
 

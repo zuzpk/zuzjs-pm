@@ -319,16 +319,23 @@ program
       const passthroughArgs = getPassthroughArgs(process.argv);
       const parsedArgOption = parseArgString(options.arg ?? options.args);
 
+      // Commander may bind the first token after `--` to optional [script].
+      // If that happens, treat it as passthrough arg instead of executable.
+      const effectiveScript =
+        script && passthroughArgs.length > 0 && script === passthroughArgs[0]
+          ? undefined
+          : script;
+
       let detected = detectProjectStart(resolvedCwd, options.cargoBin);
 
-      if (!script && !detected) {
+      if (!effectiveScript && !detected) {
         throw new Error(
           "No script was provided and project type could not be auto-detected. " +
           "Pass a script/command explicitly, e.g. `zpm start app.js` or `zpm start pnpm --arg=\"run start\"`."
         );
       }
 
-      const selectedScript = script ?? detected!.scriptPath;
+      const selectedScript = effectiveScript ?? detected!.scriptPath;
 
       const isPathLike =
         path.isAbsolute(selectedScript) ||
@@ -347,7 +354,7 @@ program
           ? localCandidate
           : selectedScript;
 
-      const autoDetectedArgs = script ? [] : (detected?.args ?? []);
+      const autoDetectedArgs = effectiveScript ? [] : (detected?.args ?? []);
 
       const mergedArgs = [
         ...autoDetectedArgs,
@@ -367,7 +374,7 @@ program
         ?? detected?.suggestedName
         ?? path.basename(selectedScript);
 
-      if (!script && detected) {
+      if (!effectiveScript && detected) {
         console.log(pc.cyan(`[ZPM]`), pc.gray(`Auto-detected ${detected.detected} project in ${resolvedCwd}`));
       }
 

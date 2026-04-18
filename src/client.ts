@@ -109,13 +109,13 @@ export class ZPMClient {
     
     logger.info("Starting ZPM daemon...");
 
-    const isDev = process.env.NODE_ENV !== "production";
+    const daemonStdio = process.env.ZPM_DAEMON_STDIO === "inherit" ? "inherit" : "ignore";
 
     const child = spawn(process.execPath, [this.daemonScript], {
       detached: true,
-      // In dev: 'inherit' lets the daemon (and its workers) use THIS terminal.
-      // In prod: 'ignore' detaches completely so you can close the terminal.
-      stdio: isDev ? "inherit" : "ignore",
+      // Default to fully detached daemon IO. Opt into inherited IO only when
+      // explicitly requested via ZPM_DAEMON_STDIO=inherit.
+      stdio: daemonStdio,
       env: { ...process.env, ZPM_NAMESPACE: this.namespace },
     });
 
