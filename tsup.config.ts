@@ -5,7 +5,8 @@ export default defineConfig({
   entry: {
     index: 'src/index.ts',
     cli: 'src/cli.ts',
-    daemon: `src/daemon.ts`
+    daemon: `src/daemon.ts`,
+    postinstall: `src/postinstall.ts`
   },
   format: ['cjs', 'esm'],
   dts: true,

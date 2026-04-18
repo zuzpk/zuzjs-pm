@@ -365,8 +365,11 @@ export class Worker {
       memoryHeap,
       mode:         this.cfg.mode ?? WorkerMode.Fork,
       instances:    mp.children.length,
+      scriptPath:   this.cfg.scriptPath,
+      cwd:          this.cfg.cwd ?? null,
       lastError:    mp.lastError ?? null,
       lastExitCode: mp.lastExitCode ?? null,
+      lastLog:      mp.logHistory.length > 0 ? mp.logHistory[mp.logHistory.length - 1].trim() : null,
     };
   }
 

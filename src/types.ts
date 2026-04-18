@@ -97,8 +97,11 @@ export interface WorkerStats {
   memoryHeap: number | null;  // bytes (JS heap, if available)
   mode: WorkerMode;
   instances: number;
+  scriptPath: string;
+  cwd: string | null;
   lastError: string | null;   // last spawn error or non-zero exit reason
   lastExitCode: number | null;
+  lastLog: string | null;
 }
 
 export type IPCCommand =

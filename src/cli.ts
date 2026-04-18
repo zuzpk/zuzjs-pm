@@ -144,6 +144,250 @@ function hashFileSha256(filePath: string): string | null {
   }
 }
 
+function formatUptime(ms: number | null): string {
+  if (!ms || ms <= 0) return "0s";
+  const total = Math.floor(ms / 1000);
+  if (total < 60) return `${total}s`;
+  const mins = Math.floor(total / 60);
+  const secs = total % 60;
+  if (mins < 60) return `${mins}m ${secs}s`;
+  const hours = Math.floor(mins / 60);
+  const remMins = mins % 60;
+  return `${hours}h ${remMins}m`;
+}
+
+function formatCpu(cpu: number | null): string {
+  if (cpu == null || Number.isNaN(cpu)) return "0.0%";
+  return `${cpu.toFixed(1)}%`;
+}
+
+function formatMem(memoryRss: number | null): string {
+  if (!memoryRss || Number.isNaN(memoryRss)) return "0 MB";
+  return `${Math.round(memoryRss / 1024 / 1024)} MB`;
+}
+
+function stripAnsi(input: string): string {
+  return input.replace(/\x1B\[[0-9;]*m/g, "");
+}
+
+function truncateCell(input: string, max = 42): string {
+  const normalized = input.replace(/\s+/g, " ").trim();
+  if (normalized.length <= max) return normalized;
+  return `${normalized.slice(0, Math.max(0, max - 1))}…`;
+}
+
+function renderTable(headers: string[], rows: string[][]): string {
+  const widths = headers.map((h, i) => {
+    let width = stripAnsi(h).length;
+    for (const row of rows) {
+      width = Math.max(width, stripAnsi(row[i] ?? "").length);
+    }
+    return width;
+  });
+
+  const makeLine = (cells: string[]) =>
+    `| ${cells.map((c, i) => {
+      const pad = widths[i] - stripAnsi(c).length;
+      return `${c}${" ".repeat(Math.max(0, pad))}`;
+    }).join(" | ")} |`;
+
+  const sep = `+-${widths.map((w) => "-".repeat(w)).join("-+-")}-+`;
+
+  const out: string[] = [];
+  out.push(sep);
+  out.push(makeLine(headers));
+  out.push(sep);
+  for (const row of rows) out.push(makeLine(row));
+  out.push(sep);
+  return out.join("\n");
+}
+
+function statusLabel(status: string): string {
+  if (status === "running") return pc.green(status.toUpperCase());
+  if (status === "stopped") return pc.yellow(status.toUpperCase());
+  if (status === "starting" || status === "stopping") return pc.cyan(status.toUpperCase());
+  return pc.red(status.toUpperCase());
+}
+
+type TableMode = "normal" | "compact" | "wide";
+type SortOrder = "asc" | "desc";
+
+const validStatuses = new Set(["stopped", "starting", "running", "stopping", "crashed", "errored"]);
+const validSortFields = new Set([
+  "name",
+  "status",
+  "pid",
+  "cpu",
+  "mem",
+  "uptime",
+  "restarts",
+  "mode",
+  "cwd",
+  "script",
+]);
+
+function getSortOrder(field: string, requestedOrder?: string): SortOrder {
+  if (requestedOrder === "asc" || requestedOrder === "desc") return requestedOrder;
+  // Resource/uptime style sorts default to descending for convenience.
+  if (["cpu", "mem", "uptime", "restarts"].includes(field)) return "desc";
+  return "asc";
+}
+
+function sortValue(stat: any, field: string): string | number {
+  switch (field) {
+    case "cpu":
+      return stat.cpu ?? 0;
+    case "mem":
+      return stat.memoryRss ?? 0;
+    case "uptime":
+      return stat.uptime ?? 0;
+    case "restarts":
+      return stat.restartCount ?? 0;
+    case "pid":
+      return stat.pid ?? -1;
+    case "status":
+      return String(stat.status ?? "").toLowerCase();
+    case "mode":
+      return String(stat.mode ?? "").toLowerCase();
+    case "cwd":
+      return String(stat.cwd ?? "").toLowerCase();
+    case "script":
+      return String(stat.scriptPath ?? "").toLowerCase();
+    case "name":
+    default:
+      return String(stat.name ?? "").toLowerCase();
+  }
+}
+
+function applyWorkerQuery(stats: any[], options: any): any[] {
+  let out = [...stats];
+
+  if (options.status) {
+    const status = String(options.status).toLowerCase();
+    if (!validStatuses.has(status)) {
+      throw new Error(
+        `Invalid --status value "${options.status}". Use one of: ${[...validStatuses].join(", ")}`
+      );
+    }
+    out = out.filter((s) => String(s.status ?? "").toLowerCase() === status);
+  }
+
+  if (options.sort) {
+    const field = String(options.sort).toLowerCase();
+    if (!validSortFields.has(field)) {
+      throw new Error(
+        `Invalid --sort value "${options.sort}". Use one of: ${[...validSortFields].join(", ")}`
+      );
+    }
+
+    const order = getSortOrder(field, options.order ? String(options.order).toLowerCase() : undefined);
+
+    out.sort((a, b) => {
+      const av = sortValue(a, field);
+      const bv = sortValue(b, field);
+      const cmp = av > bv ? 1 : av < bv ? -1 : 0;
+      return order === "desc" ? -cmp : cmp;
+    });
+  }
+
+  return out;
+}
+
+function resolveTableMode(options: any): TableMode {
+  if (options.wide) return "wide";
+  if (options.compact) return "compact";
+  return "normal";
+}
+
+function printWorkerTable(stats: any[], mode: TableMode = "normal"): void {
+  const baseRows = stats.map((s, idx) => ({
+    id: String(idx),
+    name: truncateCell(String(s.name ?? ""), 24),
+    mode: String(s.mode ?? "fork"),
+    pid: String(s.pid ?? "N/A"),
+    status: statusLabel(String(s.status ?? "unknown")),
+    restarts: String(s.restartCount ?? 0),
+    uptime: formatUptime(s.uptime ?? null),
+    cpu: formatCpu(s.cpu ?? null),
+    mem: formatMem(s.memoryRss ?? null),
+    cwd: truncateCell(String(s.cwd ?? "-"), 30),
+    script: truncateCell(String(s.scriptPath ?? "-"), 32),
+    last: truncateCell(String(s.lastError ?? s.lastLog ?? "-"), 46),
+  }));
+
+  if (mode === "compact") {
+    const headers = ["id", "name", "pid", "status", "uptime", "cpu", "mem", "restarts"];
+    const rows = baseRows.map((r) => [r.id, r.name, r.pid, r.status, r.uptime, r.cpu, r.mem, r.restarts]);
+    console.log(renderTable(headers, rows));
+    return;
+  }
+
+  if (mode === "wide") {
+    const headers = [
+      "id",
+      "name",
+      "mode",
+      "pid",
+      "status",
+      "restarts",
+      "uptime",
+      "cpu",
+      "mem",
+      "cwd",
+      "script",
+      "last error/log",
+    ];
+    const rows = stats.map((s, idx) => [
+      String(idx),
+      truncateCell(String(s.name ?? ""), 24),
+      String(s.mode ?? "fork"),
+      String(s.pid ?? "N/A"),
+      statusLabel(String(s.status ?? "unknown")),
+      String(s.restartCount ?? 0),
+      formatUptime(s.uptime ?? null),
+      formatCpu(s.cpu ?? null),
+      formatMem(s.memoryRss ?? null),
+      truncateCell(String(s.cwd ?? "-"), 64),
+      truncateCell(String(s.scriptPath ?? "-"), 72),
+      truncateCell(String(s.lastError ?? s.lastLog ?? "-"), 88),
+    ]);
+    console.log(renderTable(headers, rows));
+    return;
+  }
+
+  const headers = [
+    "id",
+    "name",
+    "mode",
+    "pid",
+    "status",
+    "restarts",
+    "uptime",
+    "cpu",
+    "mem",
+    "cwd",
+    "script",
+    "last error",
+  ];
+
+  const rows = baseRows.map((r) => [
+    r.id,
+    r.name,
+    r.mode,
+    r.pid,
+    r.status,
+    r.restarts,
+    r.uptime,
+    r.cpu,
+    r.mem,
+    r.cwd,
+    r.script,
+    r.last,
+  ]);
+
+  console.log(renderTable(headers, rows));
+}
+
 function detectProjectStart(cwd: string, cargoBin?: string): {
   scriptPath: string;
   args: string[];
@@ -319,6 +563,36 @@ program
       const passthroughArgs = getPassthroughArgs(process.argv);
       const parsedArgOption = parseArgString(options.arg ?? options.args);
 
+      const hasConfigOverride =
+        Boolean(options.name) ||
+        Boolean(options.cwd) ||
+        Boolean(options.arg) ||
+        Boolean(options.args) ||
+        passthroughArgs.length > 0 ||
+        Boolean(options.port) ||
+        Boolean(options.cluster) ||
+        Boolean(options.dev) ||
+        Boolean(options.watch) ||
+        Boolean(options.cargoBin) ||
+        Boolean(options.interpreterCommand) ||
+        Boolean(options.reloadCmd) ||
+        Boolean(options.user) ||
+        Boolean(options.probeType) ||
+        Boolean(options.probeTarget) ||
+        options.instances !== 1 ||
+        (options.with ?? options.interpreter) !== "auto";
+
+      // Shortcut: allow `zpm start <existing-worker-name>` to resume a stopped/crashed worker
+      // without re-specifying script/cwd args.
+      if (script && !hasConfigOverride) {
+        const existing = await client.getWorkerByName(script);
+        if (existing) {
+          const msg = await client.startWorker(script);
+          console.log(pc.cyan(`[ZPM]`), msg);
+          process.exit(0);
+        }
+      }
+
       // Commander may bind the first token after `--` to optional [script].
       // If that happens, treat it as passthrough arg instead of executable.
       const effectiveScript =
@@ -475,44 +749,55 @@ program
 program
   .command("list")
   .description("List all managed processes")
-  .action(async () => {
-    const names = await client.list();
-    if (names.length === 0) {
-      console.log("No workers registered.");
+  .option("--json", "Emit machine-readable JSON")
+  .option("--compact", "Compact table view")
+  .option("--wide", "Wide table view with larger path/error columns")
+  .option("--status <status>", "Filter by status: running|stopped|starting|stopping|crashed|errored")
+  .option("--sort <field>", "Sort by: name|status|pid|cpu|mem|uptime|restarts|mode|cwd|script")
+  .option("--order <order>", "Sort order: asc|desc")
+  .action(async (options) => {
+    const stats = applyWorkerQuery(await client.stats(), options);
+    if (stats.length === 0) {
+      if (options.json) {
+        console.log(JSON.stringify([], null, 2));
+      } else {
+        console.log("No workers match the current query.");
+      }
       return;
     }
-    console.log("\x1b[1mManaged Processes:\x1b[0m");
-    names.forEach(n => console.log(` • ${n}`));
+
+    if (options.json) {
+      console.log(JSON.stringify(stats, null, 2));
+      return;
+    }
+
+    printWorkerTable(stats, resolveTableMode(options));
   });
 
 // STATS
 program
   .command("stats [name]")
   .description("Show telemetry for processes")
-  .action(async (name) => {
-    const stats = await client.stats(name);
-    if (stats.length === 0) {
-      console.log("No stats available.");
+  .option("--json", "Emit machine-readable JSON")
+  .option("--compact", "Compact table view")
+  .option("--wide", "Wide table view with larger path/error columns")
+  .option("--status <status>", "Filter by status: running|stopped|starting|stopping|crashed|errored")
+  .option("--sort <field>", "Sort by: name|status|pid|cpu|mem|uptime|restarts|mode|cwd|script")
+  .option("--order <order>", "Sort order: asc|desc")
+  .action(async (name, options) => {
+    const stats = applyWorkerQuery(await client.stats(name), options);
+
+    if (options.json) {
+      console.log(JSON.stringify(stats, null, 2));
       return;
     }
-    
-    stats.forEach(s => {
-      const uptime = s.uptime ? `${Math.round(s.uptime / 1000)}s` : "0s";
-      const isOk = s.status === "running";
-      const statusColor = isOk ? "\x1b[32m" : "\x1b[31m";
-      console.log(
-        `${statusColor}[${s.status.toUpperCase()}]\x1b[0m ` +
-        `\x1b[1m${s.name.padEnd(15)}\x1b[0m ` +
-        `PID: ${String(s.pid ?? "N/A").padEnd(6)} ` +
-        `CPU: ${String(s.cpu ?? 0).padStart(3)}% ` +
-        `MEM: ${Math.round((s.memoryRss ?? 0) / 1024 / 1024)}MB ` +
-        `Uptime: ${uptime} ` +
-        `Restarts: ${s.restartCount}`
-      );
-      if (!isOk && s.lastError) {
-        console.log(`  ${"\x1b[31m"}↳ ${s.lastError}${"\x1b[0m"}`);
-      }
-    });
+
+    if (stats.length === 0) {
+      console.log("No workers match the current query.");
+      return;
+    }
+
+    printWorkerTable(stats, resolveTableMode(options));
   });
 
 // STOP / RESTART / DELETE

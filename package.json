@@ -33,6 +33,7 @@
     "dev:js": "tsup --watch",
     "dev": "npm-run-all -p dev:*",
     "build": "rm -rf dist && tsup",
+    "postinstall": "node ./dist/postinstall.cjs || true",
     "publish": "npm run build && node publish-pre.js && npm publish && node publish-post.js"
   },
   "engines": {

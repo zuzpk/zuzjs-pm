@@ -46,13 +46,26 @@ zpm start ./dist/server.js --name api --watch
 
 # Inspect
 zpm list
+zpm list --compact
+zpm list --wide
+zpm list --json
+zpm list --status running
+zpm list --sort mem --order desc
 zpm stats
 zpm stats api
+zpm stats --compact
+zpm stats --wide
+zpm stats --json
+zpm stats --sort uptime --order desc
+zpm stats --status errored
 
 # Control
 zpm restart api
 zpm stop    api
 zpm delete  api
+
+# Resume a previously registered worker by name
+zpm start api
 
 # Daemon
 zpm kill-daemon
@@ -87,6 +100,19 @@ zpm logs api
 - Working tree cleanliness (git dirty/clean)
 
 `zpm doctor --json` emits the same diagnostics in machine-readable JSON for scripts/CI.
+
+`zpm list` and `zpm stats` output modes:
+
+- default: balanced table with key metadata
+- `--compact`: fewer columns for narrow terminals/quick scans
+- `--wide`: expanded path/error columns for debugging
+- `--json`: machine-readable output for CI/scripts
+
+Query options for `zpm list` and `zpm stats`:
+
+- `--status <status>`: filter by `running`, `stopped`, `starting`, `stopping`, `crashed`, `errored`
+- `--sort <field>`: sort by `name`, `status`, `pid`, `cpu`, `mem`, `uptime`, `restarts`, `mode`, `cwd`, `script`
+- `--order <order>`: `asc` or `desc` (default is `desc` for `cpu/mem/uptime/restarts`, otherwise `asc`)
 
 Note:
 
@@ -169,6 +195,7 @@ Notes:
 
 - Use an absolute or relative path for built binaries (for example, Rust in `./target/release/...`).
 - For app arguments, pass them after `--` or use `--arg/--args`.
+- `zpm start <name>` resumes an existing worker by name when no override flags are provided (useful after `zpm stop <name>`).
 - `--watch` is an alias for `--dev`.
 - In auto-detect mode, if `package.json` start script contains `-p`/`--port`, zpm auto-detects it and frees that port before spawn.
 - `--port` is used by zpm for pre-start port freeing and health intent; pass your app port (or let auto-detect infer it). If your binary binds 25050 internally, pass `--port 25050` so zpm can free conflicts before launch.
@@ -186,6 +213,38 @@ Daemon notes:
 - If the daemon socket is owned by another user (for example root), restart may require `sudo` to terminate that process.
 - `zpm doctor` now reports socket owner uid and hints when sudo may be required for daemon lifecycle operations.
 - Daemon stdio is detached by default (so it does not keep writing logs into your terminal after `Ctrl+C`). For interactive daemon debugging only, set `ZPM_DAEMON_STDIO=inherit` before running a command.
+
+### Linux service setup on install
+
+On Linux global installs as root (`npm i -g @zuzjs/pm`), postinstall now auto-provisions a `systemd` unit and enables it.
+
+Installed unit template:
+
+```ini
+[Unit]
+Description=ZuzJS Process Manager Daemon
+After=network.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/var/lib/zpm
+ExecStart=/usr/bin/node /usr/lib/node_modules/@zuzjs/pm/dist/daemon.cjs
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
+Environment=ZPM_NAMESPACE=zuzjs-pm
+Environment=PATH=/usr/bin:/usr/local/bin:/bin
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Notes:
+
+- Actual `ExecStart` is generated dynamically from your install location and active Node binary.
+- Auto-setup is skipped for non-Linux, non-systemd hosts, non-global installs, or non-root installs.
 
 ---
 
