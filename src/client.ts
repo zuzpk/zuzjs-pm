@@ -224,13 +224,13 @@ export class ZPMClient {
   }
 
   public async getStore() : Promise<StoreInfo> {
-    const info : IPCResponse = (await send({ cmd: "get-store" }, this.namespace)) as IPCResponse
-    return info.ok == true ? info.data as ManagedProcess[] : null
+    const data = (await send({ cmd: "get-store" }, this.namespace)) as ManagedProcess[]
+    return Array.isArray(data) ? data : null
   }
 
   public async getProcessByName(processName: string) : Promise<ManagedProcess | undefined> {
-    const info : IPCResponse = (await send({ cmd: "get-store" }, this.namespace)) as IPCResponse
-    const list : any[] = info.ok == true ? info.data as any[] : []
+    const list = (await this.getStore()) as any[] | null
+    if (!list) return undefined;
     return list.find(p => p.name == processName)
   }
   // Worker control

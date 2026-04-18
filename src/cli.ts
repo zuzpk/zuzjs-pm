@@ -915,22 +915,60 @@ program
 program
   .command("store")
   .description("Show raw internal store state for debugging")
-  .action(async () => {
+  .option("--json", "Emit machine-readable JSON")
+  .action(async (options) => {
     const response = await client.getStore();
-    if ( response ){
-      const data : any[] = response as any[]
-      if (data.length === 0) {
-        console.log(pc.yellow("Store is empty."));
-        return;
-      }
+    if (!response) {
+      console.error(pc.red("StoreError: failed to fetch store data."));
+      return;
+    }
 
-      console.log(pc.magenta("\n--- Internal Process Store ---"));
-      console.table(data);
-      console.log(pc.gray(`Total Managed Processes: ${data.length}\n`));
+    const data : any[] = response as any[]
+    if (data.length === 0) {
+      if (options.json) {
+        console.log(JSON.stringify([], null, 2));
+      } else {
+        console.log(pc.yellow("Store is empty."));
+      }
+      return;
     }
-    else{
-      console.log(`StoreError`, response);
+
+    if (options.json) {
+      console.log(JSON.stringify(data, null, 2));
+      return;
     }
+
+    const headers = [
+      "name",
+      "status",
+      "pids",
+      "children",
+      "restarts",
+      "backoff(ms)",
+      "probe fails",
+      "restarting",
+      "cwd",
+      "script",
+      "last error",
+    ];
+
+    const rows = data.map((s) => [
+      truncateCell(String(s.name ?? "-"), 24),
+      statusLabel(String(s.status ?? "unknown")),
+      truncateCell(Array.isArray(s.pids) && s.pids.length > 0 ? s.pids.join(",") : "-", 16),
+      String(s.childrenCount ?? 0),
+      String(s.restartCount ?? 0),
+      String(s.backoffTime ?? 0),
+      String(s.probeFailures ?? 0),
+      String(Boolean(s.isRestarting)),
+      truncateCell(String(s.cwd ?? "-"), 30),
+      truncateCell(String(s.scriptPath ?? "-"), 32),
+      truncateCell(String(s.lastError ?? "-"), 46),
+    ]);
+
+    console.log(pc.magenta("\n--- Internal Process Store ---"));
+    console.log(renderTable(headers, rows));
+    console.log(pc.gray(`Total Managed Processes: ${data.length}\n`));
   });
 
 program

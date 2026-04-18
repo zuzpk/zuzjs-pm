@@ -129,11 +129,16 @@ async function handleMessage(
         data = Array.from(processStore.all()).map(([name, mp]) => ({
           name,
           status: mp.status,
+          scriptPath: mp.config?.scriptPath ?? null,
+          cwd: mp.config?.cwd ?? null,
           childrenCount: mp.children.length,
+          pids: mp.children.map((c) => c.pid).filter(Boolean),
           restartCount: mp.restartCount,
           backoffTime: mp.backoffTime,
           isRestarting: mp.isRestarting,
-          probeFailures: mp.probeFailures
+          probeFailures: mp.probeFailures,
+          lastError: mp.lastError ?? null,
+          lastExitCode: mp.lastExitCode ?? null,
         }));
         // socket.write(JSON.stringify({ type: "store-data", data }) + "\n");
         break;

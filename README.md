@@ -1,27 +1,6 @@
 # @zuzjs/pm
 
-A modular process manager built for the `@zuzjs` ecosystem.
-
----
-
-## Architecture
-
-```
-src/
-├── types.ts          – All shared types, enums, and interfaces
-├── logger.ts         – Thin, colorized logger (swap for @zuzjs/core)
-├── store.ts          – Reactive in-process state store (swap for @zuzjs/store)
-├── probe.ts          – Liveness probes: http | tcp | exec
-├── worker.ts         – Single-app lifecycle (Fork + Cluster modes)
-├── process-manager.ts– Controller that owns all Worker instances
-├── ipc-server.ts     – Unix socket / Named Pipe IPC server
-├── daemon.ts         – Long-running background daemon entry point
-├── client.ts         – Programmatic API + daemon spawner
-├── cli.ts            – `zpm` CLI
-└── index.ts          – Public barrel export
-```
-
----
+Production-grade process manager for the @zuzjs ecosystem.
 
 ## Install
 
@@ -29,28 +8,83 @@ src/
 npm install @zuzjs/pm
 ```
 
----
-
-## CLI Usage
+## Quick Start
 
 ```bash
-# Start the daemon implicitly (auto-spawned on first command)
+# Start a process (daemon auto-spawns on first command)
 zpm start ./dist/server.js --name api --port 3000
 
-# Cluster mode – one worker per CPU core
-zpm start ./dist/server.js --name api --cluster --port 3000
+# Inspect runtime
+zpm list
+zpm stats
+zpm logs api
 
-# Dev mode – restart on file change
-zpm start ./dist/server.js --name api --dev
-zpm start ./dist/server.js --name api --watch
+# Control lifecycle
+zpm stop api
+zpm restart api
+zpm delete api
+```
 
-# Inspect
+## CLI Commands
+
+### Start
+
+`zpm start [script]`
+
+- JavaScript paths are run with Node.
+- Non-JS executables/commands run directly.
+- If `script` is omitted, zpm attempts auto-detect from `--cwd`.
+- `zpm start <name>` resumes an existing worker by name when no override flags are given.
+
+Common examples:
+
+```bash
+zpm start app.js
+zpm start app.py --interpreter python3
+zpm start ./entry.any --interpreter custom --interpreter-command /usr/bin/env
+zpm start ./dist/server.js --name api --port 3000
+zpm start ./dist/worker.js --name worker --args "--queue emails --concurrency 4"
+
+# Next.js via package manager
+zpm start pnpm --name next-app --arg="run start -p 3000"
+zpm start pnpm --name next-app --cwd /path/to/my-web-app --arg="run start"
+
+# Rust binary
+zpm start ./target/release/my-rust-service --name rust-api --port 8080
+
+# Cargo project with explicit binary
+zpm start cargo --name service-node --cwd /path/to/my-rust-project --arg="run --bin service-node -- /path/to/service.config.json"
+
+# Cargo auto-detect mode (preferred passthrough form)
+zpm start --cwd /path/to/my-rust-project --cargo-bin service-node -- /path/to/service.config.json
+
+# Auto-detect mode
+zpm start --cwd /path/to/next-or-node-app
+zpm start --cwd /path/to/python-project
+zpm start --cwd /path/to/rust-project
+```
+
+Start notes:
+
+- Use `--` or `--arg/--args` for app arguments.
+- `--watch` is alias of `--dev`.
+- `--with` is alias of `--interpreter`.
+- For custom binaries, ensure execute permission:
+
+```bash
+chmod +x ./target/release/my-app
+```
+
+### Inspect
+
+```bash
 zpm list
 zpm list --compact
 zpm list --wide
 zpm list --json
 zpm list --status running
 zpm list --sort mem --order desc
+
 zpm stats
 zpm stats api
 zpm stats --compact
@@ -59,168 +93,100 @@ zpm stats --json
 zpm stats --sort uptime --order desc
 zpm stats --status errored
 
-# Control
+zpm store
+zpm store --json
+```
+
+Output modes for `list` and `stats`:
+
+- default: balanced table with key metadata
+- `--compact`: fewer columns for narrow terminals
+- `--wide`: expanded path/error columns for debugging
+- `--json`: machine-readable output for CI/scripts
+
+Query options for `list` and `stats`:
+
+- `--status <status>`: `running`, `stopped`, `starting`, `stopping`, `crashed`, `errored`
+- `--sort <field>`: `name`, `status`, `pid`, `cpu`, `mem`, `uptime`, `restarts`, `mode`, `cwd`, `script`
+- `--order <order>`: `asc` or `desc`
+
+### Control
+
+```bash
+zpm stop api
 zpm restart api
-zpm stop    api
-zpm delete  api
+zpm delete api
+```
 
-# Resume a previously registered worker by name
-zpm start api
+### Logs
 
-# Daemon
-zpm kill-daemon
+```bash
+zpm logs
+zpm logs api
+```
+
+`zpm logs` replays recent buffered history first, then streams live output.
+
+### Daemon
+
+```bash
+zpm start-daemon
 zpm restart-daemon
+zpm kill-daemon
+
+# Explicit service provisioning (Linux + root)
 zpm setup-service
 zpm setup-service --restart-service
+```
 
-# Doctor (deep diagnostics)
+Daemon notes:
+
+- `restart-daemon` performs deep restart (PID/socket resolution + stale cleanup + fresh start).
+- If socket owner differs (for example root-owned socket), restart/kill may require `sudo`.
+- `doctor` reports socket owner uid and sudo hints.
+- Daemon stdio is detached by default; set `ZPM_DAEMON_STDIO=inherit` for interactive debugging.
+
+### Doctor
+
+```bash
 zpm doctor
 zpm doctor --json
+```
 
-# Namespace (optional but recommended for isolated environments)
+`doctor` checks:
+
+- namespace wiring (`--namespace` / `ZPM_NAMESPACE`), socket, PID file, daemon reachability
+- local CLI hash vs global CLI hash
+- npm registry metadata (`dist.shasum` + `dist.integrity`) vs local `npm pack` artifact
+- git working tree cleanliness
+
+Doctor notes:
+
+- Source-checkout mode performs strict publish parity checks.
+- Global package locations skip local pack parity checks to avoid false mismatch noise.
+
+### Namespace
+
+Use a custom namespace to isolate environments:
+
+```bash
 zpm --namespace my-dev start pnpm --name app --arg="run start"
 zpm --namespace my-dev stats app
 zpm --namespace my-dev logs app
 zpm --namespace my-dev kill-daemon
 
-# Or set once per shell session
 export ZPM_NAMESPACE=my-dev
 zpm start pnpm --name app --arg="run start"
 zpm stats app
-
-# Logs
-# Prints recent buffered logs first, then continues streaming live output.
-zpm logs
-zpm logs api
 ```
 
-`zpm doctor` checks:
+Default namespace is `zuz-pm`.
 
-- Namespace wiring (`--namespace` / `ZPM_NAMESPACE`), socket path, PID file, and daemon reachability
-- Local CLI hash vs global CLI hash
-- npm registry metadata (`dist.shasum` + `dist.integrity`) vs your local `npm pack` artifact
-- Working tree cleanliness (git dirty/clean)
+## Linux Service Setup
 
-`zpm doctor --json` emits the same diagnostics in machine-readable JSON for scripts/CI.
+On Linux global installs as root (`npm i -g @zuzjs/pm`), postinstall provisions and enables a `systemd` unit.
 
-`zpm list` and `zpm stats` output modes:
-
-- default: balanced table with key metadata
-- `--compact`: fewer columns for narrow terminals/quick scans
-- `--wide`: expanded path/error columns for debugging
-- `--json`: machine-readable output for CI/scripts
-
-Query options for `zpm list` and `zpm stats`:
-
-- `--status <status>`: filter by `running`, `stopped`, `starting`, `stopping`, `crashed`, `errored`
-- `--sort <field>`: sort by `name`, `status`, `pid`, `cpu`, `mem`, `uptime`, `restarts`, `mode`, `cwd`, `script`
-- `--order <order>`: `asc` or `desc` (default is `desc` for `cpu/mem/uptime/restarts`, otherwise `asc`)
-
-Note:
-
-- Registry hash parity checks are strict only in a source checkout (git repo + src tree).
-- When running from a globally installed package path, doctor skips local pack parity checks to avoid false mismatch noise.
-
-### `zpm start` patterns
-
-`zpm start <script>` accepts either:
-
-- a JavaScript file path (runs with Node), or
-- a non-JS executable/command (runs directly, with `--args` forwarded).
-
-Examples:
-
-```bash
-# Examples
-zpm start app.js
-zpm start bashscript.sh
-zpm start python-app.py --watch
-zpm start binary-file -- --port 1520
-zpm start app.py --interpreter python3
-zpm start app.py --with python3
-zpm start ./scripts/boot --interpreter bash
-zpm start ./entry.noext --interpreter node
-zpm start ./entry.any --interpreter custom --interpreter-command /usr/bin/env
-
-# 1) Raw Node.js script (compiled output)
-zpm start ./dist/server.js --name api --port 3000
-
-# 2) Raw Node.js script with args
-zpm start ./dist/worker.js --name worker --args "--queue emails --concurrency 4"
-
-# 3) Next.js app via package manager
-# Run from your Next.js project root.
-zpm start pnpm --name "next-app" --arg="run start -p 3000"
-zpm start npm  --name "next-app" --arg="run start -p 3000"
-
-# Run from a different directory by setting cwd explicitly.
-zpm start pnpm --name "next-app" --cwd ../my-web-app --arg="run start"
-zpm start pnpm --name "next-app" --cwd /path/to/my-web-app --arg="run start"
-
-# Or invoke next directly:
-zpm start next --name "next-app" --arg="start -p 3000"
-
-# 4) Next.js custom server entry
-zpm start ./server.js --name web --port 3000
-
-# 5) Rust binary (cargo build --release output)
-zpm start ./target/release/my-rust-service --name rust-api --port 8080
-
-# 5.1) Cargo project with multiple binaries
-# Equivalent to: cargo run --bin service-node -- /path/to/service.config.json
-zpm start cargo --name service-node --cwd /path/to/my-rust-project --arg="run --bin service-node -- /path/to/service.config.json"
-
-# If omitting script in auto-detect mode, select cargo binary directly:
-# Preferred (cleanest) form: pass app args after `--`
-zpm start --cwd /path/to/my-rust-project --cargo-bin service-node -- /path/to/service.config.json
-
-# Also accepted via --arg with cargo-style separator:
-zpm start --cwd /path/to/my-rust-project --cargo-bin service-node --arg="-- /path/to/service.config.json"
-# Equivalent direct-binary form (no cargo separator):
-zpm start --cwd /path/to/my-rust-project --cargo-bin service-node --arg="/path/to/service.config.json"
-
-# 6) Any custom executable/app
-zpm start ./bin/custom-app --name custom --args "--env production --verbose"
-
-# 7) Auto-detect mode (script omitted)
-# If package.json has scripts.start, zpm runs the start script via your package manager.
-zpm start --cwd /path/to/next-or-node-app
-
-# If Python files are present (main.py/app.py/manage.py/server.py), zpm runs them.
-zpm start --cwd /path/to/python-project
-
-# If Cargo.toml exists, zpm prefers target/release|debug binary, else cargo run --release.
-zpm start --cwd /path/to/rust-project
-```
-
-Notes:
-
-- Use an absolute or relative path for built binaries (for example, Rust in `./target/release/...`).
-- For app arguments, pass them after `--` or use `--arg/--args`.
-- `zpm start <name>` resumes an existing worker by name when no override flags are provided (useful after `zpm stop <name>`).
-- `--watch` is an alias for `--dev`.
-- In auto-detect mode, if `package.json` start script contains `-p`/`--port`, zpm auto-detects it and frees that port before spawn.
-- `--port` is used by zpm for pre-start port freeing and health intent; pass your app port (or let auto-detect infer it). If your binary binds 25050 internally, pass `--port 25050` so zpm can free conflicts before launch.
-- `--interpreter` lets you force runtime selection: `auto`, `node`, `python3`, `bash`, or `custom` with `--interpreter-command`.
-- `--with` is an alias for `--interpreter`.
-- For custom binaries, ensure execute permission is set:
-
-```bash
-chmod +x ./target/release/my-app
-```
-
-Daemon notes:
-
-- `zpm restart-daemon` performs a deep restart flow: resolves daemon PID from PID file or socket owner, stops it, cleans stale pid/socket artifacts, and starts a fresh daemon.
-- If the daemon socket is owned by another user (for example root), restart may require `sudo` to terminate that process.
-- `zpm doctor` now reports socket owner uid and hints when sudo may be required for daemon lifecycle operations.
-- Daemon stdio is detached by default (so it does not keep writing logs into your terminal after `Ctrl+C`). For interactive daemon debugging only, set `ZPM_DAEMON_STDIO=inherit` before running a command.
-
-### Linux service setup on install
-
-On Linux global installs as root (`npm i -g @zuzjs/pm`), postinstall now auto-provisions a `systemd` unit and enables it.
-
-Installed unit template:
+Service template:
 
 ```ini
 [Unit]
@@ -236,29 +202,26 @@ ExecStart=/usr/bin/node /usr/lib/node_modules/@zuzjs/pm/dist/daemon.cjs
 Restart=always
 RestartSec=5
 Environment=NODE_ENV=production
-Environment=ZPM_NAMESPACE=zuzjs-pm
+Environment=ZPM_NAMESPACE=zuz-pm
+Environment=ZPM_STATE_DIR=/var/lib/zpm
 Environment=PATH=/usr/bin:/usr/local/bin:/bin
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-Notes:
+Service notes:
 
-- Actual `ExecStart` is generated dynamically from your install location and active Node binary.
-- Auto-setup is skipped for non-Linux, non-systemd hosts, non-global installs, or non-root installs.
-- If your npm global update did not provision service files, run manually once:
+- Actual `ExecStart` is generated dynamically from your active Node binary and install location.
+- Auto-setup is skipped on non-Linux, non-systemd, non-global, or non-root contexts.
+- If npm global update did not provision the unit, run manually:
 
 ```bash
 sudo node /usr/lib/node_modules/@zuzjs/pm/dist/postinstall.cjs
 ```
 
-- You can inspect postinstall skip reasons in npm output (lines prefixed with `[zpm postinstall]`).
-- Running `zpm start-daemon` or `zpm restart-daemon` as root on Linux also triggers a best-effort service unit check/update (without forcing `systemctl restart`).
-- You can run `zpm setup-service` explicitly to provision/refresh service files with clear output.
-- Use `zpm setup-service --restart-service` if you want to restart `zpm.service` immediately after provisioning.
-
----
+- `start-daemon` and `restart-daemon` (as root on Linux) run best-effort unit refresh without forced service restart.
+- Use `zpm setup-service --restart-service` to provision and restart immediately.
 
 ## Programmatic API
 
@@ -306,8 +269,6 @@ await pm.delete("api");
 await pm.killDaemon();
 ```
 
----
-
 ## Embedding Without the Daemon
 
 For tight integration (e.g., inside an existing long-running process):
@@ -330,8 +291,6 @@ process.on("SIGTERM", async () => {
 });
 ```
 
----
-
 ## Resiliency Features
 
 | Feature | Details |
@@ -343,8 +302,6 @@ process.on("SIGTERM", async () => {
 | **Graceful Shutdown** | `SIGTERM` → wait `killTimeout` ms → `SIGKILL` |
 | **Dev Mode** | Chokidar watches the script's directory; restarts on `change`/`add` events |
 | **Port Clearing** | Calls `fuser -k` to free a busy port before spawning |
-
----
 
 ## Build
 

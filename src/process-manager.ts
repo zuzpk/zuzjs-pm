@@ -20,7 +20,16 @@ import { Worker } from "./worker";
 export class ProcessManager {
 
   private workers = new Map<string, Worker>();
-  public readonly SNAPSHOT_FILE = path.join(os.homedir(), ".zpm", "snapshot.json");
+  public readonly SNAPSHOT_FILE: string;
+
+  constructor() {
+    const namespace = process.env.ZPM_NAMESPACE ?? "zuz-pm";
+    const isRoot = typeof process.getuid === "function" && process.getuid() === 0;
+    const stateDir = process.env.ZPM_STATE_DIR
+      ?? (isRoot ? "/var/lib/zpm" : path.join(os.homedir(), ".zpm"));
+
+    this.SNAPSHOT_FILE = path.join(stateDir, `snapshot.${namespace}.json`);
+  }
 
   // CRUD
   public async start(config: WorkerConfig): Promise<void> {

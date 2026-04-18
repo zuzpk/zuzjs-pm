@@ -69,7 +69,7 @@ function main(): void {
       fs.mkdirSync(workingDirectory, { recursive: true });
     }
 
-    const unit = `[Unit]\nDescription=ZuzJS Process Manager Daemon\nAfter=network.target\n\n[Service]\nType=simple\nUser=root\nGroup=root\nWorkingDirectory=${workingDirectory}\nExecStart=${process.execPath} ${daemonPath}\nRestart=always\nRestartSec=5\nEnvironment=NODE_ENV=production\nEnvironment=ZPM_NAMESPACE=zuzjs-pm\nEnvironment=PATH=/usr/bin:/usr/local/bin:/bin\n\n[Install]\nWantedBy=multi-user.target\n`;
+    const unit = `[Unit]\nDescription=ZuzJS Process Manager Daemon\nAfter=network.target\n\n[Service]\nType=simple\nUser=root\nGroup=root\nWorkingDirectory=${workingDirectory}\nExecStart=${process.execPath} ${daemonPath}\nRestart=always\nRestartSec=5\nEnvironment=NODE_ENV=production\nEnvironment=ZPM_NAMESPACE=zuz-pm\nEnvironment=ZPM_STATE_DIR=/var/lib/zpm\nEnvironment=PATH=/usr/bin:/usr/local/bin:/bin\n\n[Install]\nWantedBy=multi-user.target\n`;
 
     fs.writeFileSync(servicePath, unit, "utf8");
 
