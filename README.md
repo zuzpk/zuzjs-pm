@@ -69,6 +69,7 @@ Start notes:
 - Use `--` or `--arg/--args` for app arguments.
 - `--watch` is alias of `--dev`.
 - `--with` is alias of `--interpreter`.
+- `zpm` now preserves inherited `NODE_ENV` by default (instead of forcing production). In `--dev` mode it sets `NODE_ENV=development`.
 - For custom binaries, ensure execute permission:
 
 ```bash

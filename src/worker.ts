@@ -475,13 +475,17 @@ export class Worker {
         this.cfg.interpreterCommand,
       );
 
+      const effectiveNodeEnv = this.cfg.devMode
+        ? "development"
+        : (this.cfg.env?.NODE_ENV ?? process.env.NODE_ENV);
+
       const spawnOptions : dynamic = {
           cwd,
           stdio: ["ignore", "pipe", "pipe"],
           env: { 
             ...process.env, 
             ...(this.cfg.env ?? {}), 
-            NODE_ENV: this.cfg.devMode ? "development" : "production",
+            ...(effectiveNodeEnv ? { NODE_ENV: effectiveNodeEnv } : {}),
             PATH: buildAugmentedPath(cwd),
           },
           detached: false,
@@ -543,13 +547,21 @@ export class Worker {
       ? [this.cfg.scriptPath, ...(this.cfg.args ?? [])]
       : [...(this.cfg.args ?? [])];
 
+    const effectiveNodeEnv = this.cfg.devMode
+      ? "development"
+      : (this.cfg.env?.NODE_ENV ?? process.env.NODE_ENV);
+
       const child = spawn(
         executable, 
         args, 
         {
           cwd: path.dirname(path.resolve(this.cfg.scriptPath, '..')), // Go up one level from dist
           stdio:    ["ignore", "pipe", "pipe"],
-          env:      { ...process.env, ...(this.cfg.env ?? {}), NODE_ENV: this.cfg.devMode ? "development" : "production" },
+          env:      {
+            ...process.env,
+            ...(this.cfg.env ?? {}),
+            ...(effectiveNodeEnv ? { NODE_ENV: effectiveNodeEnv } : {}),
+          },
           detached: false,
           shell:    false,
         }
