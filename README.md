@@ -42,6 +42,7 @@ zpm start ./dist/server.js --name api --cluster --port 3000
 
 # Dev mode – restart on file change
 zpm start ./dist/server.js --name api --dev
+zpm start ./dist/server.js --name api --watch
 
 # Inspect
 zpm list
@@ -72,6 +73,17 @@ zpm logs api
 Examples:
 
 ```bash
+# Examples
+zpm start app.js
+zpm start bashscript.sh
+zpm start python-app.py --watch
+zpm start binary-file -- --port 1520
+zpm start app.py --interpreter python3
+zpm start app.py --with python3
+zpm start ./scripts/boot --interpreter bash
+zpm start ./entry.noext --interpreter node
+zpm start ./entry.any --interpreter custom --interpreter-command /usr/bin/env
+
 # 1) Raw Node.js script (compiled output)
 zpm start ./dist/server.js --name api --port 3000
 
@@ -98,11 +110,27 @@ zpm start ./target/release/my-app --name rust-api --port 8080
 
 # 6) Any custom executable/app
 zpm start ./bin/custom-app --name custom --args "--env production --verbose"
+
+# 7) Auto-detect mode (script omitted)
+# If package.json has scripts.start, zpm runs the start script via your package manager.
+zpm start --cwd /path/to/next-or-node-app
+
+# If Python files are present (main.py/app.py/manage.py/server.py), zpm runs them.
+zpm start --cwd /path/to/python-project
+
+# If Cargo.toml exists, zpm prefers target/release|debug binary, else cargo run --release.
+zpm start --cwd /path/to/rust-project
 ```
 
 Notes:
 
 - Use an absolute or relative path for built binaries (for example, Rust in `./target/release/...`).
+- For app arguments, pass them after `--` or use `--arg/--args`.
+- `--watch` is an alias for `--dev`.
+- In auto-detect mode, if `package.json` start script contains `-p`/`--port`, zpm auto-detects it and frees that port before spawn.
+- `--port` is used by zpm for pre-start port freeing and health intent; pass your app port (or let auto-detect infer it). If your binary binds 25050 internally, pass `--port 25050` so zpm can free conflicts before launch.
+- `--interpreter` lets you force runtime selection: `auto`, `node`, `python3`, `bash`, or `custom` with `--interpreter-command`.
+- `--with` is an alias for `--interpreter`.
 - For custom binaries, ensure execute permission is set:
 
 ```bash

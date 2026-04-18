@@ -26,7 +26,8 @@ import { ProcessManager } from "./process-manager";
 
 // PID file
 
-const PID_FILE = path.join(os.tmpdir(), "zuz-pm.pid");
+const namespace = process.env.ZPM_NAMESPACE ?? "zuz-pm";
+const PID_FILE = path.join(os.tmpdir(), `${namespace}.pid`);
 
 function writePid(): void {
   fs.writeFileSync(PID_FILE, String(process.pid));
@@ -43,11 +44,11 @@ function clearPid(): void {
 // Boot
 async function main(): Promise<void> {
 
-  logger.success("daemon", `Booting ZPM daemon (PID ${process.pid})`);
+  logger.success("daemon", `Booting ZPM daemon (PID ${process.pid}, namespace: ${namespace})`);
   writePid();
 
   const pm      = new ProcessManager();
-  const server  = startIPCServer(pm);
+  const server  = startIPCServer(pm, namespace);
 
   if (fs.existsSync(pm.SNAPSHOT_FILE)) {
     try {

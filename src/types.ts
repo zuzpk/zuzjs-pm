@@ -63,6 +63,14 @@ export interface WorkerConfig {
    * run inside the user's project directory.
    */
   cwd?: string;
+  /** Runtime override for script-like targets.
+   * auto: infer by extension
+   * node/python3/bash: force that interpreter
+   * custom: use interpreterCommand if provided, otherwise execute scriptPath directly
+   */
+  interpreter?: "auto" | "node" | "python3" | "bash" | "custom";
+  /** Executable used when interpreter=custom, e.g. "/usr/bin/env" */
+  interpreterCommand?: string;
 }
 
 export interface LivenessProbeConfig {

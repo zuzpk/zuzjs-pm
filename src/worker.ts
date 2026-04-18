@@ -144,6 +144,69 @@ function buildAugmentedPath(cwd: string): string {
   ].filter(Boolean).join(path.delimiter);
 }
 
+function resolveExecution(
+  scriptPath: string,
+  args: string[],
+  interpreter: "auto" | "node" | "python3" | "bash" | "custom" = "auto",
+  interpreterCommand?: string,
+): { executable: string; args: string[] } {
+  const isBareCommand =
+    !path.isAbsolute(scriptPath) &&
+    !scriptPath.startsWith(".") &&
+    !scriptPath.includes("/") &&
+    !scriptPath.includes("\\");
+
+  if (interpreter !== "auto") {
+    if (interpreter === "custom") {
+      if (interpreterCommand) {
+        return {
+          executable: interpreterCommand,
+          args: [scriptPath, ...args],
+        };
+      }
+      return {
+        executable: scriptPath,
+        args,
+      };
+    }
+
+    if (!isBareCommand) {
+      return {
+        executable: interpreter,
+        args: [scriptPath, ...args],
+      };
+    }
+  }
+
+  const ext = path.extname(scriptPath).toLowerCase();
+
+  if ([".js", ".mjs", ".cjs", ".ts", ".mts", ".cts"].includes(ext)) {
+    return {
+      executable: process.execPath,
+      args: [scriptPath, ...args],
+    };
+  }
+
+  if (ext === ".py") {
+    return {
+      executable: "python3",
+      args: [scriptPath, ...args],
+    };
+  }
+
+  if (ext === ".sh") {
+    return {
+      executable: "bash",
+      args: [scriptPath, ...args],
+    };
+  }
+
+  return {
+    executable: scriptPath,
+    args,
+  };
+}
+
 // Worker class
 export class Worker {
   private readonly cfg: WorkerConfig;
@@ -392,30 +455,22 @@ export class Worker {
 
   private forkChild(): ChildProcess | null {
     try {
-      const isJs = this.cfg.scriptPath.endsWith('.js');
       // Determine if we are running a file or a global command (like 'tsc')
       const isAbsolute = path.isAbsolute(this.cfg.scriptPath);
 
-      let executable: string;
-      let args: string[];
       let cwd: string;
 
-      if (isJs) {
-        // Scenario A: Standard Node.js script
-        executable = process.execPath; // Using process.execPath is safer than 'node'
-        args = [this.cfg.scriptPath, ...(this.cfg.args ?? [])];
-        // Your existing logic: Go up one level from dist
-        cwd = path.dirname(path.resolve(this.cfg.scriptPath, '..'));
-      } else {
-        // Scenario B: Global command (pnpm, npm, next, tsc, custom binary …)
-        executable = this.cfg.scriptPath;
-        args = [...(this.cfg.args ?? [])];
+      // Prefer the cwd captured at CLI invocation time (i.e. the user's project
+      // directory). Fall back to the absolute-binary directory or daemon cwd.
+      cwd = this.cfg.cwd
+        ?? (isAbsolute ? path.dirname(this.cfg.scriptPath) : process.cwd());
 
-        // Prefer the cwd captured at CLI invocation time (i.e. the user's project
-        // directory).  Fall back to the absolute-binary directory or daemon cwd.
-        cwd = this.cfg.cwd
-          ?? (isAbsolute ? path.dirname(this.cfg.scriptPath) : process.cwd());
-      }
+      const { executable, args } = resolveExecution(
+        this.cfg.scriptPath,
+        [...(this.cfg.args ?? [])],
+        this.cfg.interpreter ?? "auto",
+        this.cfg.interpreterCommand,
+      );
 
       const spawnOptions : dynamic = {
           cwd,
@@ -545,9 +600,8 @@ export class Worker {
     
     if (mp.status === WorkerStatus.Stopping) {
       if (remaining.length === 0) {
-        logger.info(this.name, "All instances dead. Spawning new ones...");
+        logger.info(this.name, "All instances stopped.");
         this.patch({ isRestarting: false });
-        this.spawnAll();
       }
       else{
         logger.info(this.name, `Stop in progress... waiting for ${remaining.length} instance(s) to stop.`);

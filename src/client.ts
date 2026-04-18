@@ -116,6 +116,7 @@ export class ZPMClient {
       // In dev: 'inherit' lets the daemon (and its workers) use THIS terminal.
       // In prod: 'ignore' detaches completely so you can close the terminal.
       stdio: isDev ? "inherit" : "ignore",
+      env: { ...process.env, ZPM_NAMESPACE: this.namespace },
     });
 
     child.unref();
@@ -126,7 +127,7 @@ export class ZPMClient {
 
   /** Kill the daemon by PID */
   public async killDaemon(): Promise<void> {
-    const pidFile = path.join(os.tmpdir(), "zuz-pm.pid");
+    const pidFile = path.join(os.tmpdir(), `${this.namespace}.pid`);
     if (!fs.existsSync(pidFile)) {
       throw new Error("Daemon PID file not found – is the daemon running?");
     }

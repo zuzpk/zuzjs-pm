@@ -34,11 +34,132 @@ program.parseOptions(process.argv);
 const options = program.opts();
 const namespace = options.namespace;
 
-const client = new ZPMClient(namespace);
+const client = new ZPMClient({ namespace });
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const pkgPath = path.resolve(__dirname, `../package.json`)
 const pkg = JSON.parse(fs.readFileSync(pkgPath, `utf8`))
+
+function parseArgString(input?: string): string[] {
+  if (!input?.trim()) return [];
+
+  const tokens: string[] = [];
+  const rx = /"([^"\\]*(?:\\.[^"\\]*)*)"|'([^'\\]*(?:\\.[^'\\]*)*)'|([^\s]+)/g;
+  let m: RegExpExecArray | null;
+
+  while ((m = rx.exec(input)) !== null) {
+    tokens.push((m[1] ?? m[2] ?? m[3]).replace(/\\(["'\\])/g, "$1"));
+  }
+
+  return tokens;
+}
+
+function getPassthroughArgs(argv: string[]): string[] {
+  const idx = argv.indexOf("--");
+  return idx === -1 ? [] : argv.slice(idx + 1);
+}
+
+function readJsonFile<T = any>(filePath: string): T | null {
+  try {
+    if (!fs.existsSync(filePath)) return null;
+    return JSON.parse(fs.readFileSync(filePath, "utf8")) as T;
+  } catch {
+    return null;
+  }
+}
+
+function detectProjectStart(cwd: string): {
+  scriptPath: string;
+  args: string[];
+  suggestedName: string;
+  detected: string;
+  detectedPort?: number;
+} | null {
+  const packageJsonPath = path.join(cwd, "package.json");
+  const packageJson = readJsonFile<any>(packageJsonPath);
+
+  if (packageJson?.scripts?.start) {
+    const startScript: string = String(packageJson.scripts.start);
+    const portMatch = startScript.match(/(?:^|\s)(?:--port|-p)\s+(\d+)(?:\s|$)/);
+    const detectedPort = portMatch ? Number(portMatch[1]) : undefined;
+
+    const packageManager = fs.existsSync(path.join(cwd, "pnpm-lock.yaml"))
+      ? "pnpm"
+      : fs.existsSync(path.join(cwd, "yarn.lock"))
+        ? "yarn"
+        : fs.existsSync(path.join(cwd, "bun.lockb")) || fs.existsSync(path.join(cwd, "bun.lock"))
+          ? "bun"
+          : "npm";
+
+    const args = packageManager === "yarn"
+      ? ["start"]
+      : ["run", "start"];
+
+    return {
+      scriptPath: packageManager,
+      args,
+      suggestedName: packageJson.name ?? path.basename(cwd),
+      detected: packageJson.dependencies?.next || packageJson.devDependencies?.next ? "nextjs" : "node",
+      detectedPort,
+    };
+  }
+
+  const pyCandidates = ["main.py", "app.py", "manage.py", "server.py"];
+  for (const file of pyCandidates) {
+    const full = path.join(cwd, file);
+    if (fs.existsSync(full)) {
+      return {
+        scriptPath: full,
+        args: [],
+        suggestedName: path.basename(cwd),
+        detected: "python",
+      };
+    }
+  }
+
+  const cargoTomlPath = path.join(cwd, "Cargo.toml");
+  if (fs.existsSync(cargoTomlPath)) {
+    try {
+      const cargoToml = fs.readFileSync(cargoTomlPath, "utf8");
+      const packageNameMatch = cargoToml.match(/^name\s*=\s*"([^"]+)"/m);
+      const packageName = packageNameMatch?.[1];
+
+      if (packageName) {
+        const releaseBin = path.join(cwd, "target", "release", packageName);
+        const debugBin = path.join(cwd, "target", "debug", packageName);
+
+        if (fs.existsSync(releaseBin)) {
+          return {
+            scriptPath: releaseBin,
+            args: [],
+            suggestedName: packageName,
+            detected: "rust-binary",
+          };
+        }
+
+        if (fs.existsSync(debugBin)) {
+          return {
+            scriptPath: debugBin,
+            args: [],
+            suggestedName: packageName,
+            detected: "rust-binary",
+          };
+        }
+      }
+    } catch {
+      // ignore parse errors and continue
+    }
+
+    return {
+      scriptPath: "cargo",
+      args: ["run", "--release"],
+      suggestedName: path.basename(cwd),
+      detected: "rust-cargo",
+    };
+  }
+
+  return null;
+}
 
 async function attachLogStream(namespace: string, name: string | undefined) {
   const isRunning = await client.isDaemonRunning();
@@ -82,7 +203,7 @@ program
 
 // START
 program
-  .command("start <script>")
+  .command("start [script]")
   .description("Start a new process")
   .option("-n, --name <name>", "Unique name for the process")
   .option("--cwd <dir>", "Working directory for the process (can be relative, e.g. ..)")
@@ -90,6 +211,7 @@ program
   .option("-i, --instances <number>", "Number of instances (cluster mode)", parseInt, 1)
   
   .option("-d, --dev", "Enable development mode (auto-restart)", false)
+  .option("--watch", "Alias for --dev", false)
   .option("--reload-cmd <command>", "Command to run before restarting in dev mode")
   .option("-u, --user <username>", "User to run the process as")
   .option("-c, --cluster", "Use cluster mode instead of fork", false)
@@ -97,10 +219,14 @@ program
   .option("--save-logs", "Save logs to a local file", false)
   .option("--arg <string>", "Arguments to pass to the executable (e.g. \"run start -p 3000\")")
   .option("--args <string>", "Alias for --arg")
+  .option("--interpreter <type>", "Force runtime: auto|node|python3|bash|custom", "auto")
+  .option("--with <type>", "Alias for --interpreter")
+  .option("--interpreter-command <command>", "Executable used when --interpreter=custom")
   .option("--probe-type <type>", "Type of probe: http, tcp, or exec")
   .option("--probe-target <target>", "URL, host:port, or command")
   .option("--probe-interval <sec>", "Seconds between probes", parseInt, 30)
   .option("--probe-threshold <count>", "Failures before restart", parseInt, 3)
+  .allowExcessArguments(true)
   .action(async (script, options) => {
     try {
       await client.ensureDaemon();
@@ -113,26 +239,62 @@ program
         throw new Error(`Invalid cwd: ${resolvedCwd}`);
       }
 
+      const passthroughArgs = getPassthroughArgs(process.argv);
+      const parsedArgOption = parseArgString(options.arg ?? options.args);
+
+      let detected = detectProjectStart(resolvedCwd);
+
+      if (!script && !detected) {
+        throw new Error(
+          "No script was provided and project type could not be auto-detected. " +
+          "Pass a script/command explicitly, e.g. `zpm start app.js` or `zpm start pnpm --arg=\"run start\"`."
+        );
+      }
+
+      const selectedScript = script ?? detected!.scriptPath;
+
       const isPathLike =
-        path.isAbsolute(script) ||
-        script.startsWith(".") ||
-        script.includes("/") ||
-        script.includes("\\");
+        path.isAbsolute(selectedScript) ||
+        selectedScript.startsWith(".") ||
+        selectedScript.includes("/") ||
+        selectedScript.includes("\\");
+
+      const localCandidate = path.resolve(resolvedCwd, selectedScript);
+      const shouldUseLocalPath = !isPathLike && fs.existsSync(localCandidate);
 
       // Keep bare commands (e.g. "next", "tsx", "python") untouched so
       // they can be resolved from PATH/node_modules/.bin at runtime.
-      const scriptPath = isPathLike ? path.resolve(resolvedCwd, script) : script;
-      const processName = options.name ?? path.basename(script);
+      const scriptPath = isPathLike
+        ? path.resolve(resolvedCwd, selectedScript)
+        : shouldUseLocalPath
+          ? localCandidate
+          : selectedScript;
+
+      const mergedArgs = [
+        ...(detected?.args ?? []),
+        ...parsedArgOption,
+        ...passthroughArgs,
+      ];
+
+      const processName = options.name
+        ?? detected?.suggestedName
+        ?? path.basename(selectedScript);
+
+      if (!script && detected) {
+        console.log(pc.cyan(`[ZPM]`), pc.gray(`Auto-detected ${detected.detected} project in ${resolvedCwd}`));
+      }
 
       const msg = await client.start({
-        name: options.name ?? path.basename(script),
+        name: processName,
         scriptPath,
         cwd: resolvedCwd,
-        port: options.port,
+        port: options.port ?? detected?.detectedPort,
         instances: options.instances,
-        devMode: options.dev,
+        devMode: options.dev || options.watch,
+        interpreter: options.with ?? options.interpreter,
+        interpreterCommand: options.interpreterCommand,
         mode: options.cluster ? WorkerMode.Cluster : WorkerMode.Fork,
-        args: (options.arg ?? options.args) ? (options.arg ?? options.args).split(" ") : [],
+        args: mergedArgs,
         reloadCommand: options.reloadCmd,
         user: options.user,
         probe: options.probeTarget ? {
@@ -150,7 +312,7 @@ program
       
       console.log(pc.cyan(`[ZPM]`), msg)
 
-      if (options.dev) {
+      if (options.dev || options.watch) {
         await attachLogStream(namespace, processName);
       } else {
         process.exit(0); // Exit if not in dev mode to return terminal control

@@ -23,8 +23,8 @@ export function getSocketPath(namespace: string = "zuz-pm"): string {
   return path.join(os.tmpdir(), `${namespace}.sock`);
 }
 
-export function startIPCServer(pm: ProcessManager): net.Server {
-  const sockPath = getSocketPath();
+export function startIPCServer(pm: ProcessManager, namespace: string = "zuz-pm"): net.Server {
+  const sockPath = getSocketPath(namespace);
 
   // Clean up stale socket file
   if (fs.existsSync(sockPath)) fs.unlinkSync(sockPath);
