@@ -11,6 +11,14 @@ function hasCommand(cmd: string): boolean {
   }
 }
 
+function shellOut(command: string): string | null {
+  try {
+    return execSync(command, { stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
+  } catch {
+    return null;
+  }
+}
+
 function isRootUser(): boolean {
   const uid = typeof process.getuid === "function" ? process.getuid() : -1;
   return uid === 0;
@@ -31,6 +39,35 @@ function isGlobalInstallInvocation(): boolean {
     packageRoot.startsWith("/usr/lib/node_modules/") ||
     packageRoot.startsWith("/usr/local/lib/node_modules/")
   );
+}
+
+function resolveServiceIdentity(): {
+  user: string;
+  group: string;
+  homeDir: string;
+  stateDir: string;
+} {
+  const sudoUser = String(process.env.SUDO_USER ?? "").trim();
+  const preferUser = sudoUser && sudoUser !== "root" ? sudoUser : "root";
+
+  if (preferUser === "root") {
+    return {
+      user: "root",
+      group: "root",
+      homeDir: "/root",
+      stateDir: "/var/lib/zpm",
+    };
+  }
+
+  const group = shellOut(`id -gn ${preferUser}`) ?? preferUser;
+  const homeDir = shellOut(`getent passwd ${preferUser} | cut -d: -f6`) ?? `/home/${preferUser}`;
+
+  return {
+    user: preferUser,
+    group,
+    homeDir,
+    stateDir: path.join(homeDir, ".zpm"),
+  };
 }
 
 function main(): void {
@@ -62,14 +99,23 @@ function main(): void {
 
   const serviceName = "zpm.service";
   const servicePath = path.join("/etc/systemd/system", serviceName);
-  const workingDirectory = "/var/lib/zpm";
+  const identity = resolveServiceIdentity();
+  const workingDirectory = identity.stateDir;
 
   try {
     if (!fs.existsSync(workingDirectory)) {
       fs.mkdirSync(workingDirectory, { recursive: true });
     }
 
-    const unit = `[Unit]\nDescription=ZuzJS Process Manager Daemon\nAfter=network.target\n\n[Service]\nType=simple\nUser=root\nGroup=root\nWorkingDirectory=${workingDirectory}\nExecStart=${process.execPath} ${daemonPath}\nRestart=always\nRestartSec=5\nEnvironment=NODE_ENV=production\nEnvironment=ZPM_NAMESPACE=zuz-pm\nEnvironment=ZPM_STATE_DIR=/var/lib/zpm\nEnvironment=PATH=/usr/bin:/usr/local/bin:/bin\n\n[Install]\nWantedBy=multi-user.target\n`;
+    if (identity.user !== "root") {
+      try {
+        execSync(`chown -R ${identity.user}:${identity.group} "${workingDirectory}"`, { stdio: "ignore" });
+      } catch {
+        // best-effort ownership fixup
+      }
+    }
+
+    const unit = `[Unit]\nDescription=ZuzJS Process Manager Daemon\nAfter=network.target\n\n[Service]\nType=simple\nUser=${identity.user}\nGroup=${identity.group}\nWorkingDirectory=${workingDirectory}\nExecStart=${process.execPath} ${daemonPath}\nRestart=always\nRestartSec=5\nEnvironment=NODE_ENV=production\nEnvironment=ZPM_NAMESPACE=zuz-pm\nEnvironment=ZPM_STATE_DIR=${identity.stateDir}\nEnvironment=PATH=/usr/bin:/usr/local/bin:/bin\n\n[Install]\nWantedBy=multi-user.target\n`;
 
     fs.writeFileSync(servicePath, unit, "utf8");
 
@@ -88,7 +134,7 @@ function main(): void {
       execSync(`systemctl start ${serviceName}`, { stdio: "ignore" });
     }
 
-    console.log("[zpm postinstall] Installed and enabled systemd service: zpm.service");
+    console.log(`[zpm postinstall] Installed and enabled systemd service: zpm.service (user=${identity.user}, state=${identity.stateDir})`);
   } catch (err: any) {
     console.warn(`[zpm postinstall] Skipped service setup: ${err?.message ?? String(err)}`);
   }

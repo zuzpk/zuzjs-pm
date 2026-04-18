@@ -21,6 +21,7 @@ export class ProcessManager {
 
   private workers = new Map<string, Worker>();
   private readonly stateDir: string;
+  private migrationAuditMessage: string | null = null;
   public readonly SNAPSHOT_FILE: string;
 
   constructor() {
@@ -35,7 +36,20 @@ export class ProcessManager {
 
   private migrateLegacySnapshot(namespace: string): void {
     try {
-      if (fs.existsSync(this.SNAPSHOT_FILE)) return;
+      const readSnapshotArray = (filePath: string): WorkerConfig[] | null => {
+        try {
+          if (!fs.existsSync(filePath)) return null;
+          const raw = fs.readFileSync(filePath, "utf8").trim();
+          if (!raw) return [];
+          const parsed = JSON.parse(raw);
+          return Array.isArray(parsed) ? parsed : null;
+        } catch {
+          return null;
+        }
+      };
+
+      const current = readSnapshotArray(this.SNAPSHOT_FILE);
+      if (current && current.length > 0) return;
 
       const candidates = new Set<string>();
       const homeDir = os.homedir();
@@ -61,24 +75,26 @@ export class ProcessManager {
 
       for (const source of candidates) {
         if (!source || source === this.SNAPSHOT_FILE) continue;
-        if (!fs.existsSync(source)) continue;
-
-        const raw = fs.readFileSync(source, "utf8").trim();
-        if (!raw) continue;
-
-        const parsed = JSON.parse(raw);
-        if (!Array.isArray(parsed)) continue;
+        const parsed = readSnapshotArray(source);
+        if (!parsed || parsed.length === 0) continue;
 
         const dir = path.dirname(this.SNAPSHOT_FILE);
         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
         fs.writeFileSync(this.SNAPSHOT_FILE, JSON.stringify(parsed, null, 2));
-        logger.warn("daemon", `Migrated legacy snapshot from ${source} -> ${this.SNAPSHOT_FILE}`);
+        this.migrationAuditMessage = `Snapshot migration imported ${parsed.length} workers from ${source} -> ${this.SNAPSHOT_FILE}`;
+        logger.warn("daemon", this.migrationAuditMessage);
         return;
       }
     } catch (err: any) {
       logger.warn("daemon", `Legacy snapshot migration skipped: ${err?.message ?? String(err)}`);
     }
+  }
+
+  public consumeMigrationAudit(): string | null {
+    const msg = this.migrationAuditMessage;
+    this.migrationAuditMessage = null;
+    return msg;
   }
 
   // CRUD

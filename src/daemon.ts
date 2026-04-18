@@ -44,11 +44,25 @@ function clearPid(): void {
 // Boot
 async function main(): Promise<void> {
 
-  logger.success("daemon", `Booting ZPM daemon (PID ${process.pid}, namespace: ${namespace})`);
+  const uid = typeof process.getuid === "function" ? process.getuid() : null;
+  const user = (() => {
+    try {
+      return os.userInfo().username;
+    } catch {
+      return "unknown";
+    }
+  })();
+  const userContext = uid === 0 ? `root (${user})` : `${user}${uid !== null ? ` (uid ${uid})` : ""}`;
+
+  logger.success("daemon", `Booting ZPM daemon (PID ${process.pid}, namespace: ${namespace}, user: ${userContext})`);
   writePid();
 
   const pm      = new ProcessManager();
   const server  = startIPCServer(pm, namespace);
+  const migrationAudit = pm.consumeMigrationAudit();
+  if (migrationAudit) {
+    logger.info("daemon", migrationAudit);
+  }
 
   if (fs.existsSync(pm.SNAPSHOT_FILE)) {
     try {

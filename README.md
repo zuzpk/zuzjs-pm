@@ -146,6 +146,8 @@ Daemon notes:
 - If socket owner differs (for example root-owned socket), restart/kill may require `sudo`.
 - `doctor` reports socket owner uid and sudo hints.
 - Daemon stdio is detached by default; set `ZPM_DAEMON_STDIO=inherit` for interactive debugging.
+- Daemon boot logs include runtime user context (root vs current user) for quick troubleshooting.
+- When legacy snapshot recovery runs, a one-time migration audit log shows source and destination snapshot paths.
 
 ### Doctor
 
@@ -196,15 +198,15 @@ After=network.target
 
 [Service]
 Type=simple
-User=root
-Group=root
-WorkingDirectory=/var/lib/zpm
+User=<service-user>
+Group=<service-group>
+WorkingDirectory=/home/<service-user>/.zpm
 ExecStart=/usr/bin/node /usr/lib/node_modules/@zuzjs/pm/dist/daemon.cjs
 Restart=always
 RestartSec=5
 Environment=NODE_ENV=production
 Environment=ZPM_NAMESPACE=zuz-pm
-Environment=ZPM_STATE_DIR=/var/lib/zpm
+Environment=ZPM_STATE_DIR=/home/<service-user>/.zpm
 Environment=PATH=/usr/bin:/usr/local/bin:/bin
 
 [Install]
@@ -214,6 +216,7 @@ WantedBy=multi-user.target
 Service notes:
 
 - Actual `ExecStart` is generated dynamically from your active Node binary and install location.
+- When provisioned via `sudo`, zpm prefers `SUDO_USER` as service user (for example `appuser`) instead of forcing root.
 - Auto-setup is skipped on non-Linux, non-systemd, non-global, or non-root contexts.
 - If npm global update did not provision the unit, run manually:
 
