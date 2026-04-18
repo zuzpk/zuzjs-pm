@@ -270,8 +270,10 @@ program
           ? localCandidate
           : selectedScript;
 
+      const autoDetectedArgs = script ? [] : (detected?.args ?? []);
+
       const mergedArgs = [
-        ...(detected?.args ?? []),
+        ...autoDetectedArgs,
         ...parsedArgOption,
         ...passthroughArgs,
       ];
