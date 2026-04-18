@@ -143,7 +143,13 @@ zpm start ./target/release/my-rust-service --name rust-api --port 8080
 zpm start cargo --name service-node --cwd /path/to/my-rust-project --arg="run --bin service-node -- /path/to/service.config.json"
 
 # If omitting script in auto-detect mode, select cargo binary directly:
+# Preferred (cleanest) form: pass app args after `--`
+zpm start --cwd /path/to/my-rust-project --cargo-bin service-node -- /path/to/service.config.json
+
+# Also accepted via --arg with cargo-style separator:
 zpm start --cwd /path/to/my-rust-project --cargo-bin service-node --arg="-- /path/to/service.config.json"
+# Equivalent direct-binary form (no cargo separator):
+zpm start --cwd /path/to/my-rust-project --cargo-bin service-node --arg="/path/to/service.config.json"
 
 # 6) Any custom executable/app
 zpm start ./bin/custom-app --name custom --args "--env production --verbose"

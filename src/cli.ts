@@ -355,6 +355,14 @@ program
         ...passthroughArgs,
       ];
 
+      // In rust-binary auto-detect mode, users often pass cargo-style args like
+      // `--arg="-- /path/to/config"`. Unlike `cargo run`, direct binary execution
+      // should not receive the separator token itself.
+      const normalizedArgs =
+        detected?.detected === "rust-binary" && mergedArgs[0] === "--"
+          ? mergedArgs.slice(1)
+          : mergedArgs;
+
       const processName = options.name
         ?? detected?.suggestedName
         ?? path.basename(selectedScript);
@@ -373,7 +381,7 @@ program
         interpreter: options.with ?? options.interpreter,
         interpreterCommand: options.interpreterCommand,
         mode: options.cluster ? WorkerMode.Cluster : WorkerMode.Fork,
-        args: mergedArgs,
+        args: normalizedArgs,
         reloadCommand: options.reloadCmd,
         user: options.user,
         probe: options.probeTarget ? {
