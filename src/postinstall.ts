@@ -11,19 +11,54 @@ function hasCommand(cmd: string): boolean {
   }
 }
 
-function isGlobalInstallRoot(): boolean {
-  const npmGlobal = process.env.npm_config_global;
+function isRootUser(): boolean {
   const uid = typeof process.getuid === "function" ? process.getuid() : -1;
-  return npmGlobal === "true" && uid === 0;
+  return uid === 0;
+}
+
+function isGlobalInstallInvocation(): boolean {
+  const npmGlobal = String(process.env.npm_config_global ?? "").toLowerCase();
+  const npmLocation = String(process.env.npm_config_location ?? "").toLowerCase();
+  const npmArgv = String(process.env.npm_config_argv ?? "").toLowerCase();
+  const packageRoot = path.resolve(__dirname, "..");
+
+  if (npmGlobal === "true" || npmGlobal === "1") return true;
+  if (npmLocation === "global") return true;
+  if (npmArgv.includes('"global":true')) return true;
+
+  // Fallback for npm variants that do not pass global env flags reliably.
+  return (
+    packageRoot.startsWith("/usr/lib/node_modules/") ||
+    packageRoot.startsWith("/usr/local/lib/node_modules/")
+  );
 }
 
 function main(): void {
-  if (process.platform !== "linux") return;
-  if (!isGlobalInstallRoot()) return;
-  if (!hasCommand("systemctl")) return;
+  if (process.platform !== "linux") {
+    console.log("[zpm postinstall] Skip: non-linux platform.");
+    return;
+  }
+
+  if (!isRootUser()) {
+    console.log("[zpm postinstall] Skip: not running as root.");
+    return;
+  }
+
+  if (!isGlobalInstallInvocation()) {
+    console.log("[zpm postinstall] Skip: not a global install/update invocation.");
+    return;
+  }
+
+  if (!hasCommand("systemctl")) {
+    console.log("[zpm postinstall] Skip: systemctl not found.");
+    return;
+  }
 
   const daemonPath = path.resolve(__dirname, "daemon.cjs");
-  if (!fs.existsSync(daemonPath)) return;
+  if (!fs.existsSync(daemonPath)) {
+    console.log("[zpm postinstall] Skip: daemon binary not found.");
+    return;
+  }
 
   const serviceName = "zpm.service";
   const servicePath = path.join("/etc/systemd/system", serviceName);
@@ -40,6 +75,11 @@ function main(): void {
 
     execSync("systemctl daemon-reload", { stdio: "ignore" });
     execSync(`systemctl enable ${serviceName}`, { stdio: "ignore" });
+
+    if (process.env.ZPM_POSTINSTALL_NO_SERVICE_RESTART === "1") {
+      console.log("[zpm postinstall] Installed/enabled systemd unit (service restart skipped).");
+      return;
+    }
 
     // Start or restart service to apply upgrades immediately.
     try {

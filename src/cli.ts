@@ -144,6 +144,53 @@ function hashFileSha256(filePath: string): string | null {
   }
 }
 
+function runDaemonProvisioning(options?: {
+  skipServiceRestart?: boolean;
+  quiet?: boolean;
+}): void {
+  const skipServiceRestart = options?.skipServiceRestart ?? true;
+  const quiet = options?.quiet ?? true;
+
+  if (process.platform !== "linux") {
+    if (!quiet) console.log(pc.yellow("[ZPM] setup-service is only available on Linux."));
+    return;
+  }
+
+  const uid = typeof process.getuid === "function" ? process.getuid() : -1;
+  if (uid !== 0) {
+    if (!quiet) console.log(pc.yellow("[ZPM] setup-service requires root (run with sudo)."));
+    return;
+  }
+
+  const candidates = [
+    path.resolve(__dirname, "postinstall.cjs"),
+    path.resolve(__dirname, "postinstall.js"),
+  ];
+
+  const scriptPath = candidates.find((p) => fs.existsSync(p));
+  if (!scriptPath) {
+    if (!quiet) console.log(pc.red("[ZPM] postinstall script not found in dist."));
+    return;
+  }
+
+  try {
+    execSync(`${process.execPath} "${scriptPath}"`, {
+      stdio: quiet ? "ignore" : "inherit",
+      env: {
+        ...process.env,
+        ZPM_POSTINSTALL_NO_SERVICE_RESTART: skipServiceRestart ? "1" : "0",
+      },
+    });
+    if (quiet) {
+      console.log(pc.cyan(`[ZPM]`), pc.gray("Service unit check completed."));
+    }
+  } catch {
+    if (!quiet) {
+      console.log(pc.red("[ZPM] setup-service failed. Check output above."));
+    }
+  }
+}
+
 function formatUptime(ms: number | null): string {
   if (!ms || ms <= 0) return "0s";
   const total = Math.floor(ms / 1000);
@@ -821,6 +868,7 @@ program
   .description("Start the background ZPM daemon")
   .action(async () => {
     await client.ensureDaemon();
+    runDaemonProvisioning({ skipServiceRestart: true, quiet: true });
     console.log("\x1b[32m[ZPM]\x1b[0m Daemon started.");
   });
 
@@ -831,10 +879,23 @@ program
   .action(async () => {
     try {
       await client.restartDaemon();
+      runDaemonProvisioning({ skipServiceRestart: true, quiet: true });
       console.log("\x1b[32m[ZPM]\x1b[0m Daemon restarted.");
     } catch (err: any) {
       console.error(`\x1b[31m[Error]\x1b[0m ${err.message}`);
     }
+  });
+
+// SERVICE SETUP
+program
+  .command("setup-service")
+  .description("Provision or refresh Linux systemd unit for zpm daemon")
+  .option("--restart-service", "Restart zpm.service after provisioning", false)
+  .action(async (options) => {
+    runDaemonProvisioning({
+      skipServiceRestart: !options.restartService,
+      quiet: false,
+    });
   });
 
 // KILL DAEMON

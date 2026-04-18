@@ -70,6 +70,8 @@ zpm start api
 # Daemon
 zpm kill-daemon
 zpm restart-daemon
+zpm setup-service
+zpm setup-service --restart-service
 
 # Doctor (deep diagnostics)
 zpm doctor
@@ -245,6 +247,16 @@ Notes:
 
 - Actual `ExecStart` is generated dynamically from your install location and active Node binary.
 - Auto-setup is skipped for non-Linux, non-systemd hosts, non-global installs, or non-root installs.
+- If your npm global update did not provision service files, run manually once:
+
+```bash
+sudo node /usr/lib/node_modules/@zuzjs/pm/dist/postinstall.cjs
+```
+
+- You can inspect postinstall skip reasons in npm output (lines prefixed with `[zpm postinstall]`).
+- Running `zpm start-daemon` or `zpm restart-daemon` as root on Linux also triggers a best-effort service unit check/update (without forcing `systemctl restart`).
+- You can run `zpm setup-service` explicitly to provision/refresh service files with clear output.
+- Use `zpm setup-service --restart-service` if you want to restart `zpm.service` immediately after provisioning.
 
 ---
 
