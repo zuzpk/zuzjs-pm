@@ -60,15 +60,16 @@ zpm restart-daemon
 
 # Doctor (deep diagnostics)
 zpm doctor
+zpm doctor --json
 
 # Namespace (optional but recommended for isolated environments)
-zpm --namespace local-debug start pnpm --name app --arg="run start"
-zpm --namespace local-debug stats app
-zpm --namespace local-debug logs app
-zpm --namespace local-debug kill-daemon
+zpm --namespace my-dev start pnpm --name app --arg="run start"
+zpm --namespace my-dev stats app
+zpm --namespace my-dev logs app
+zpm --namespace my-dev kill-daemon
 
 # Or set once per shell session
-export ZPM_NAMESPACE=local-debug
+export ZPM_NAMESPACE=my-dev
 zpm start pnpm --name app --arg="run start"
 zpm stats app
 
@@ -84,6 +85,8 @@ zpm logs api
 - Local CLI hash vs global CLI hash
 - npm registry metadata (`dist.shasum` + `dist.integrity`) vs your local `npm pack` artifact
 - Working tree cleanliness (git dirty/clean)
+
+`zpm doctor --json` emits the same diagnostics in machine-readable JSON for scripts/CI.
 
 Note:
 
@@ -123,8 +126,8 @@ zpm start pnpm --name "next-app" --arg="run start -p 3000"
 zpm start npm  --name "next-app" --arg="run start -p 3000"
 
 # Run from a different directory by setting cwd explicitly.
-zpm start pnpm --name "next-app" --cwd ../zuflare-web --arg="run start"
-zpm start pnpm --name "next-app" --cwd /home/zuzflare/zuflare-web --arg="run start"
+zpm start pnpm --name "next-app" --cwd ../my-web-app --arg="run start"
+zpm start pnpm --name "next-app" --cwd /path/to/my-web-app --arg="run start"
 
 # Or invoke next directly:
 zpm start next --name "next-app" --arg="start -p 3000"
@@ -133,7 +136,14 @@ zpm start next --name "next-app" --arg="start -p 3000"
 zpm start ./server.js --name web --port 3000
 
 # 5) Rust binary (cargo build --release output)
-zpm start ./target/release/my-app --name rust-api --port 8080
+zpm start ./target/release/my-rust-service --name rust-api --port 8080
+
+# 5.1) Cargo project with multiple binaries
+# Equivalent to: cargo run --bin service-node -- /path/to/service.config.json
+zpm start cargo --name service-node --cwd /path/to/my-rust-project --arg="run --bin service-node -- /path/to/service.config.json"
+
+# If omitting script in auto-detect mode, select cargo binary directly:
+zpm start --cwd /path/to/my-rust-project --cargo-bin service-node --arg="-- /path/to/service.config.json"
 
 # 6) Any custom executable/app
 zpm start ./bin/custom-app --name custom --args "--env production --verbose"

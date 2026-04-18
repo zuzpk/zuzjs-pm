@@ -71,6 +71,45 @@ function readJsonFile<T = any>(filePath: string): T | null {
   }
 }
 
+async function pingNamespace(namespace: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = net.createConnection(getSocketPath(namespace));
+    let buf = "";
+    let done = false;
+
+    const finish = (value: boolean) => {
+      if (done) return;
+      done = true;
+      try { socket.destroy(); } catch {}
+      resolve(value);
+    };
+
+    socket.on("connect", () => {
+      socket.write(JSON.stringify({ cmd: "ping" }) + "\n");
+    });
+
+    socket.on("data", (chunk) => {
+      buf += chunk.toString();
+      const lines = buf.split("\n");
+      buf = lines.pop() ?? "";
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const res = JSON.parse(line);
+          finish(res?.ok === true && res?.data === "pong");
+          return;
+        } catch {
+          // ignore parse fragments
+        }
+      }
+    });
+
+    socket.on("error", () => finish(false));
+    socket.setTimeout(1200, () => finish(false));
+  });
+}
+
 function runCmd(command: string, cwd?: string): string | null {
   try {
     return execSync(command, {
@@ -105,7 +144,7 @@ function hashFileSha256(filePath: string): string | null {
   }
 }
 
-function detectProjectStart(cwd: string): {
+function detectProjectStart(cwd: string, cargoBin?: string): {
   scriptPath: string;
   args: string[];
   suggestedName: string;
@@ -159,7 +198,7 @@ function detectProjectStart(cwd: string): {
     try {
       const cargoToml = fs.readFileSync(cargoTomlPath, "utf8");
       const packageNameMatch = cargoToml.match(/^name\s*=\s*"([^"]+)"/m);
-      const packageName = packageNameMatch?.[1];
+      const packageName = cargoBin ?? packageNameMatch?.[1];
 
       if (packageName) {
         const releaseBin = path.join(cwd, "target", "release", packageName);
@@ -189,8 +228,8 @@ function detectProjectStart(cwd: string): {
 
     return {
       scriptPath: "cargo",
-      args: ["run", "--release"],
-      suggestedName: path.basename(cwd),
+      args: cargoBin ? ["run", "--release", "--bin", cargoBin] : ["run", "--release"],
+      suggestedName: cargoBin ?? path.basename(cwd),
       detected: "rust-cargo",
     };
   }
@@ -256,6 +295,7 @@ program
   .option("--save-logs", "Save logs to a local file", false)
   .option("--arg <string>", "Arguments to pass to the executable (e.g. \"run start -p 3000\")")
   .option("--args <string>", "Alias for --arg")
+  .option("--cargo-bin <name>", "Rust binary name to run when project is Cargo workspace/package")
   .option("--interpreter <type>", "Force runtime: auto|node|python3|bash|custom", "auto")
   .option("--with <type>", "Alias for --interpreter")
   .option("--interpreter-command <command>", "Executable used when --interpreter=custom")
@@ -279,7 +319,7 @@ program
       const passthroughArgs = getPassthroughArgs(process.argv);
       const parsedArgOption = parseArgString(options.arg ?? options.args);
 
-      let detected = detectProjectStart(resolvedCwd);
+      let detected = detectProjectStart(resolvedCwd, options.cargoBin);
 
       if (!script && !detected) {
         throw new Error(
@@ -535,7 +575,8 @@ program
 program
   .command("doctor")
   .description("Deep diagnostics: daemon health, namespace wiring, and npm hash checks")
-  .action(async () => {
+  .option("--json", "Output machine-readable JSON diagnostics", false)
+  .action(async (options) => {
     const packageRoot = path.dirname(pkgPath);
     const hasSourceTree = fs.existsSync(path.join(packageRoot, "src"));
     const gitTopLevel = runCmd("git rev-parse --show-toplevel", packageRoot);
@@ -561,7 +602,7 @@ program
       socketOwnerUid !== null &&
       socketOwnerUid !== currentUid;
 
-    const daemonReachable = await client.isDaemonRunning();
+    const daemonReachable = await pingNamespace(namespace);
     const socketExists = fs.existsSync(socketPath);
     const pidFileExists = fs.existsSync(pidFilePath);
     const pidRaw = pidFileExists ? fs.readFileSync(pidFilePath, "utf8").trim() : null;
@@ -629,6 +670,56 @@ program
       return ok ? pc.green("OK") : pc.red("FAIL");
     };
 
+    const cliHashMatch = !!localCliHash && !!globalCliHash ? localCliHash === globalCliHash : null;
+
+    const diagnostics = {
+      namespace,
+      daemon: {
+        socketPath,
+        socketExists,
+        socketOwnerUid,
+        pidFilePath,
+        pidFileExists,
+        pid,
+        pidAlive,
+        reachable: daemonReachable,
+      },
+      install: {
+        cliPackageVersion: pkg.version,
+        globalBinPath,
+        globalPackageVersion: globalPkg?.version ?? null,
+        localCliSha256: localCliHash,
+        globalCliSha256: globalCliHash,
+        cliHashMatch,
+      },
+      registry: {
+        npmLatestVersion,
+        npmDistShasum: npmCurrentVersionShasum,
+        localPackShasum: canCheckPublishParity ? localPackedShasum : null,
+        shasumMatch: canCheckPublishParity ? (npmCurrentVersionShasum && localPackedShasum ? shasumMatchesRegistry : null) : null,
+        npmIntegrity: npmCurrentVersionIntegrity,
+        localPackIntegrity: canCheckPublishParity ? localPackedIntegrity : null,
+        integrityMatch: canCheckPublishParity ? (npmCurrentVersionIntegrity && localPackedIntegrity ? integrityMatchesRegistry : null) : null,
+        publishParityChecksSkipped: !canCheckPublishParity,
+      },
+      workspace: {
+        isGitRepo,
+        gitDirty,
+      },
+      hints: {
+        stalePidDetected: !daemonReachable && pidFileExists && pidAlive === false,
+        sudoLikelyRequired: mayRequireSudo,
+        globalVersionDiffers: !!globalPkg?.version && globalPkg.version !== pkg.version,
+        localNotLatest: !!npmLatestVersion && npmLatestVersion !== pkg.version,
+        publishHashMismatch: canCheckPublishParity && !!npmCurrentVersionShasum && !!localPackedShasum && !shasumMatchesRegistry,
+      },
+    };
+
+    if (options.json) {
+      process.stdout.write(JSON.stringify(diagnostics, null, 2) + "\n");
+      return;
+    }
+
     console.log(pc.bold("\nZPM Doctor"));
     console.log(pc.gray("--------------------------------------------------"));
     console.log(`Namespace:           ${pc.cyan(namespace)}`);
@@ -646,7 +737,7 @@ program
     console.log(`Global pkg version:  ${globalPkg?.version ?? "N/A"}`);
     console.log(`Local cli sha256:    ${localCliHash ?? "N/A"}`);
     console.log(`Global cli sha256:   ${globalCliHash ?? "N/A"}`);
-    console.log(`CLI hash match:      ${statusLabel(!!localCliHash && !!globalCliHash ? localCliHash === globalCliHash : null)}`);
+    console.log(`CLI hash match:      ${statusLabel(cliHashMatch)}`);
 
     console.log(pc.gray("\nRegistry / Publish"));
     console.log(pc.gray("--------------------------------------------------"));
