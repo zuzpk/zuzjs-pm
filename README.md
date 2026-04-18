@@ -84,6 +84,11 @@ zpm logs api
 - npm registry metadata (`dist.shasum` + `dist.integrity`) vs your local `npm pack` artifact
 - Working tree cleanliness (git dirty/clean)
 
+Note:
+
+- Registry hash parity checks are strict only in a source checkout (git repo + src tree).
+- When running from a globally installed package path, doctor skips local pack parity checks to avoid false mismatch noise.
+
 ### `zpm start` patterns
 
 `zpm start <script>` accepts either:

@@ -540,6 +540,11 @@ program
   .description("Deep diagnostics: daemon health, namespace wiring, and npm hash checks")
   .action(async () => {
     const packageRoot = path.dirname(pkgPath);
+    const hasSourceTree = fs.existsSync(path.join(packageRoot, "src"));
+    const gitTopLevel = runCmd("git rev-parse --show-toplevel", packageRoot);
+    const isGitRepo = !!gitTopLevel;
+    const canCheckPublishParity = hasSourceTree && isGitRepo;
+
     const localCliPath = path.join(packageRoot, "dist", "cli.cjs");
     const localCliHash = hashFileSha256(localCliPath);
     const socketPath = getSocketPath(namespace);
@@ -571,21 +576,24 @@ program
     const npmCurrentVersionShasum = runJsonCmd<string>(`npm view @zuzjs/pm@${pkg.version} dist.shasum --json`);
     const npmCurrentVersionIntegrity = runJsonCmd<string>(`npm view @zuzjs/pm@${pkg.version} dist.integrity --json`);
 
-    let localPackInfo = runJsonCmd<Array<{ filename: string; shasum: string; integrity?: string }>>(
-      "npm pack --json --dry-run",
-      packageRoot,
-    );
-
-    if (!localPackInfo) {
+    let localPackInfo: Array<{ filename: string; shasum: string; integrity?: string }> | null = null;
+    if (canCheckPublishParity) {
       localPackInfo = runJsonCmd<Array<{ filename: string; shasum: string; integrity?: string }>>(
-        "npm pack --json",
+        "npm pack --json --dry-run",
         packageRoot,
       );
 
-      const tarballName = localPackInfo?.[0]?.filename;
-      if (tarballName) {
-        const tarballPath = path.join(packageRoot, tarballName);
-        if (fs.existsSync(tarballPath)) fs.unlinkSync(tarballPath);
+      if (!localPackInfo) {
+        localPackInfo = runJsonCmd<Array<{ filename: string; shasum: string; integrity?: string }>>(
+          "npm pack --json",
+          packageRoot,
+        );
+
+        const tarballName = localPackInfo?.[0]?.filename;
+        if (tarballName) {
+          const tarballPath = path.join(packageRoot, tarballName);
+          if (fs.existsSync(tarballPath)) fs.unlinkSync(tarballPath);
+        }
       }
     }
 
@@ -602,7 +610,7 @@ program
       !!localPackedIntegrity &&
       npmCurrentVersionIntegrity === localPackedIntegrity;
 
-    const gitDirtyRaw = runCmd("git status --porcelain", packageRoot);
+    const gitDirtyRaw = isGitRepo ? runCmd("git status --porcelain", gitTopLevel!) : null;
     const gitDirty = gitDirtyRaw ? gitDirtyRaw.length > 0 : null;
 
     const statusLabel = (ok: boolean | null) => {
@@ -632,15 +640,15 @@ program
     console.log(pc.gray("--------------------------------------------------"));
     console.log(`npm latest version:  ${npmLatestVersion ?? "N/A"}`);
     console.log(`npm dist.shasum:     ${npmCurrentVersionShasum ?? "N/A"}`);
-    console.log(`local pack shasum:   ${localPackedShasum ?? "N/A"}`);
-    console.log(`shasum match:        ${statusLabel(npmCurrentVersionShasum && localPackedShasum ? shasumMatchesRegistry : null)}`);
+    console.log(`local pack shasum:   ${canCheckPublishParity ? (localPackedShasum ?? "N/A") : pc.yellow("SKIPPED (not source checkout)")}`);
+    console.log(`shasum match:        ${canCheckPublishParity ? statusLabel(npmCurrentVersionShasum && localPackedShasum ? shasumMatchesRegistry : null) : pc.yellow("SKIPPED")}`);
     console.log(`npm integrity:       ${npmCurrentVersionIntegrity ?? "N/A"}`);
-    console.log(`local integrity:     ${localPackedIntegrity ?? "N/A"}`);
-    console.log(`integrity match:     ${statusLabel(npmCurrentVersionIntegrity && localPackedIntegrity ? integrityMatchesRegistry : null)}`);
+    console.log(`local integrity:     ${canCheckPublishParity ? (localPackedIntegrity ?? "N/A") : pc.yellow("SKIPPED (not source checkout)")}`);
+    console.log(`integrity match:     ${canCheckPublishParity ? statusLabel(npmCurrentVersionIntegrity && localPackedIntegrity ? integrityMatchesRegistry : null) : pc.yellow("SKIPPED")}`);
 
     console.log(pc.gray("\nWorkspace"));
     console.log(pc.gray("--------------------------------------------------"));
-    console.log(`git working tree:    ${gitDirty === null ? pc.yellow("UNKNOWN") : gitDirty ? pc.yellow("DIRTY") : pc.green("CLEAN")}`);
+    console.log(`git working tree:    ${isGitRepo ? (gitDirty === null ? pc.yellow("UNKNOWN") : gitDirty ? pc.yellow("DIRTY") : pc.green("CLEAN")) : pc.yellow("NOT A GIT CHECKOUT")}`);
 
     console.log(pc.gray("\nHints"));
     console.log(pc.gray("--------------------------------------------------"));
@@ -653,7 +661,10 @@ program
     if (npmLatestVersion && npmLatestVersion !== pkg.version) {
       console.log(pc.yellow(`- Local package version (${pkg.version}) is not npm latest (${npmLatestVersion}).`));
     }
-    if (npmCurrentVersionShasum && localPackedShasum && !shasumMatchesRegistry) {
+    if (!canCheckPublishParity) {
+      console.log(pc.yellow("- Publish parity checks are skipped outside a source checkout (git + src)."));
+    }
+    if (canCheckPublishParity && npmCurrentVersionShasum && localPackedShasum && !shasumMatchesRegistry) {
       console.log(pc.red("- Local packed artifact hash does not match npm dist.shasum for this version."));
       console.log(pc.red("  This usually means code changed without version bump/re-publish."));
     }
