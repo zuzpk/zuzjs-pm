@@ -11,7 +11,7 @@
  *   await pm.stop("api");
  */
 
-import { spawn } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
@@ -148,6 +148,14 @@ export class ZPMClient {
     } catch (err: any) {
       if (err?.code === "ESRCH") {
         console.log(`[ZPM] Daemon PID ${pid} is not running (stale pid file). Cleaning up.`);
+      } else if (err?.code === "EPERM") {
+        const killedWithSudo = this.trySudoKill(pid);
+        if (!killedWithSudo) {
+          throw new Error(
+            `Permission denied while killing daemon PID ${pid}. ` +
+            `Run with sudo or grant permission: sudo zpm --namespace ${this.namespace} kill-daemon`
+          );
+        }
       } else {
         throw new Error(`Failed to kill daemon: ${err.message}`);
       }
@@ -159,6 +167,60 @@ export class ZPMClient {
         // best effort cleanup
       }
     }
+  }
+
+  /**
+   * Deep restart for daemon lifecycle hygiene:
+   * - discover PID from pid file or socket owner
+   * - terminate if possible
+   * - clean stale pid/socket entries
+   * - spawn a fresh daemon
+   */
+  public async restartDaemon(): Promise<void> {
+    const pidFile = path.join(os.tmpdir(), `${this.namespace}.pid`);
+    const socketPath = getSocketPath(this.namespace);
+
+    const pidFromFile = this.readPidFile(pidFile);
+    const pidFromSocket = this.findSocketOwnerPid(socketPath);
+    const pid = pidFromFile ?? pidFromSocket;
+
+    if (pid) {
+      try {
+        process.kill(pid, "SIGTERM");
+        console.log(`[ZPM] Sent SIGTERM to daemon (PID ${pid})`);
+      } catch (err: any) {
+        if (err?.code !== "ESRCH") {
+          if (err?.code === "EPERM") {
+            const killedWithSudo = this.trySudoKill(pid);
+            if (!killedWithSudo) {
+              throw new Error(
+                `Permission denied while killing daemon PID ${pid}. ` +
+                `Run with sudo or grant permission: sudo zpm --namespace ${this.namespace} restart-daemon`
+              );
+            }
+          } else {
+            throw new Error(`Failed to kill daemon: ${err.message}`);
+          }
+        }
+      }
+    }
+
+    await this.waitForDaemonDown(5_000);
+
+    // Best-effort stale artifact cleanup before a fresh boot.
+    try {
+      if (fs.existsSync(pidFile)) fs.unlinkSync(pidFile);
+    } catch {
+      this.trySudoUnlink(pidFile);
+    }
+
+    try {
+      if (fs.existsSync(socketPath)) fs.unlinkSync(socketPath);
+    } catch {
+      this.trySudoUnlink(socketPath);
+    }
+
+    await this.ensureDaemon();
   }
 
   public async getStore() : Promise<StoreInfo> {
@@ -261,6 +323,90 @@ export class ZPMClient {
       };
       setTimeout(check, interval);
     });
+  }
+
+  private waitForDaemonDown(timeoutMs: number): Promise<void> {
+    const start = Date.now();
+    const interval = 200;
+
+    return new Promise((resolve, reject) => {
+      const check = () => {
+        this.isDaemonRunning().then((alive) => {
+          if (!alive) return resolve();
+          if (Date.now() - start > timeoutMs) {
+            return reject(new Error("Daemon did not stop in time"));
+          }
+          setTimeout(check, interval);
+        });
+      };
+      setTimeout(check, interval);
+    });
+  }
+
+  private readPidFile(pidFile: string): number | null {
+    try {
+      if (!fs.existsSync(pidFile)) return null;
+      const raw = fs.readFileSync(pidFile, "utf8").trim();
+      const pid = Number(raw);
+      return Number.isFinite(pid) && pid > 0 ? pid : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private findSocketOwnerPid(socketPath: string): number | null {
+    const escaped = socketPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+    // Linux path: ss provides pid metadata for listening unix sockets.
+    try {
+      const out = execSync(`ss -xlp | grep '${escaped}'`, {
+        stdio: ["ignore", "pipe", "ignore"],
+        env: process.env,
+      }).toString();
+      const match = out.match(/pid=(\d+)/);
+      if (match) return Number(match[1]);
+    } catch {
+      // continue fallback
+    }
+
+    // Fallback: lsof can also expose the owning process id.
+    try {
+      const out = execSync(`lsof -t '${socketPath}'`, {
+        stdio: ["ignore", "pipe", "ignore"],
+        env: process.env,
+      }).toString().trim();
+      const pid = Number(out.split("\n")[0]);
+      if (Number.isFinite(pid) && pid > 0) return pid;
+    } catch {
+      // no owner found
+    }
+
+    return null;
+  }
+
+  private trySudoKill(pid: number): boolean {
+    try {
+      execSync(`sudo -n kill ${pid}`, {
+        stdio: ["ignore", "ignore", "ignore"],
+        env: process.env,
+      });
+      console.log(`[ZPM] Used sudo to stop daemon PID ${pid}.`);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private trySudoUnlink(filePath: string): boolean {
+    try {
+      execSync(`sudo -n rm -f '${filePath.replace(/'/g, "'\\''")}'`, {
+        stdio: ["ignore", "ignore", "ignore"],
+        env: process.env,
+      });
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 

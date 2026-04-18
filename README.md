@@ -56,6 +56,7 @@ zpm delete  api
 
 # Daemon
 zpm kill-daemon
+zpm restart-daemon
 
 # Doctor (deep diagnostics)
 zpm doctor
@@ -162,6 +163,12 @@ Notes:
 ```bash
 chmod +x ./target/release/my-app
 ```
+
+Daemon notes:
+
+- `zpm restart-daemon` performs a deep restart flow: resolves daemon PID from PID file or socket owner, stops it, cleans stale pid/socket artifacts, and starts a fresh daemon.
+- If the daemon socket is owned by another user (for example root), restart may require `sudo` to terminate that process.
+- `zpm doctor` now reports socket owner uid and hints when sudo may be required for daemon lifecycle operations.
 
 ---
 

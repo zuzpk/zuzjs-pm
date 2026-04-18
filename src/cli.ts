@@ -490,14 +490,11 @@ program
   .description("Restart the background ZPM daemon")
   .action(async () => {
     try {
-      await client.killDaemon();
+      await client.restartDaemon();
+      console.log("\x1b[32m[ZPM]\x1b[0m Daemon restarted.");
     } catch (err: any) {
-      if (!String(err?.message ?? "").includes("PID file")) {
-        throw err;
-      }
+      console.error(`\x1b[31m[Error]\x1b[0m ${err.message}`);
     }
-    await client.ensureDaemon();
-    console.log("\x1b[32m[ZPM]\x1b[0m Daemon started.");
   });
 
 // KILL DAEMON
@@ -549,6 +546,20 @@ program
     const localCliHash = hashFileSha256(localCliPath);
     const socketPath = getSocketPath(namespace);
     const pidFilePath = path.join(os.tmpdir(), `${namespace}.pid`);
+    const currentUid = typeof process.getuid === "function" ? process.getuid() : null;
+    const socketOwnerUid = (() => {
+      try {
+        if (!fs.existsSync(socketPath)) return null;
+        return fs.statSync(socketPath).uid;
+      } catch {
+        return null;
+      }
+    })();
+    const mayRequireSudo =
+      currentUid !== null &&
+      currentUid !== 0 &&
+      socketOwnerUid !== null &&
+      socketOwnerUid !== currentUid;
 
     const daemonReachable = await client.isDaemonRunning();
     const socketExists = fs.existsSync(socketPath);
@@ -622,6 +633,7 @@ program
     console.log(pc.gray("--------------------------------------------------"));
     console.log(`Namespace:           ${pc.cyan(namespace)}`);
     console.log(`Socket path:         ${socketPath} (${socketExists ? pc.green("exists") : pc.yellow("missing")})`);
+    console.log(`Socket owner uid:    ${socketOwnerUid ?? "N/A"}`);
     console.log(`PID file:            ${pidFilePath} (${pidFileExists ? pc.green("exists") : pc.yellow("missing")})`);
     console.log(`PID value:           ${pid ?? "N/A"}`);
     console.log(`PID alive:           ${statusLabel(pidAlive)}`);
@@ -654,6 +666,9 @@ program
     console.log(pc.gray("--------------------------------------------------"));
     if (!daemonReachable && pidFileExists && pidAlive === false) {
       console.log(pc.yellow("- Stale PID file detected. Run `zpm kill-daemon` to clean it."));
+    }
+    if (mayRequireSudo) {
+      console.log(pc.yellow(`- Socket is owned by uid ${socketOwnerUid}. Daemon stop/restart may require sudo.`));
     }
     if (globalPkg?.version && globalPkg.version !== pkg.version) {
       console.log(pc.yellow(`- Global version (${globalPkg.version}) differs from current package (${pkg.version}).`));
