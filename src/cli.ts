@@ -15,8 +15,11 @@
  */
 
 import { Command } from "commander";
+import { execSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import net from "node:net";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pc from "picocolors";
@@ -63,6 +66,40 @@ function readJsonFile<T = any>(filePath: string): T | null {
   try {
     if (!fs.existsSync(filePath)) return null;
     return JSON.parse(fs.readFileSync(filePath, "utf8")) as T;
+  } catch {
+    return null;
+  }
+}
+
+function runCmd(command: string, cwd?: string): string | null {
+  try {
+    return execSync(command, {
+      cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: process.env,
+    }).toString().trim();
+  } catch {
+    return null;
+  }
+}
+
+function runJsonCmd<T = any>(command: string, cwd?: string): T | null {
+  const output = runCmd(command, cwd);
+  if (!output) return null;
+
+  try {
+    return JSON.parse(output) as T;
+  } catch {
+    return null;
+  }
+}
+
+function hashFileSha256(filePath: string): string | null {
+  try {
+    if (!fs.existsSync(filePath)) return null;
+    const hash = createHash("sha256");
+    hash.update(fs.readFileSync(filePath));
+    return hash.digest("hex");
   } catch {
     return null;
   }
@@ -496,6 +533,131 @@ program
     else{
       console.log(`StoreError`, response);
     }
+  });
+
+program
+  .command("doctor")
+  .description("Deep diagnostics: daemon health, namespace wiring, and npm hash checks")
+  .action(async () => {
+    const packageRoot = path.dirname(pkgPath);
+    const localCliPath = path.join(packageRoot, "dist", "cli.cjs");
+    const localCliHash = hashFileSha256(localCliPath);
+    const socketPath = getSocketPath(namespace);
+    const pidFilePath = path.join(os.tmpdir(), `${namespace}.pid`);
+
+    const daemonReachable = await client.isDaemonRunning();
+    const socketExists = fs.existsSync(socketPath);
+    const pidFileExists = fs.existsSync(pidFilePath);
+    const pidRaw = pidFileExists ? fs.readFileSync(pidFilePath, "utf8").trim() : null;
+    const pid = pidRaw ? Number(pidRaw) : null;
+
+    let pidAlive: boolean | null = null;
+    if (pid && Number.isFinite(pid) && pid > 0) {
+      try {
+        process.kill(pid, 0);
+        pidAlive = true;
+      } catch {
+        pidAlive = false;
+      }
+    }
+
+    const globalBinPath = runCmd("which zpm");
+    const globalRoot = runCmd("npm root -g");
+    const globalPkgPath = globalRoot ? path.join(globalRoot, "@zuzjs", "pm", "package.json") : null;
+    const globalPkg = globalPkgPath ? readJsonFile<{ version?: string }>(globalPkgPath) : null;
+    const globalCliHash = globalBinPath ? hashFileSha256(globalBinPath) : null;
+
+    const npmLatestVersion = runJsonCmd<string>("npm view @zuzjs/pm version --json");
+    const npmCurrentVersionShasum = runJsonCmd<string>(`npm view @zuzjs/pm@${pkg.version} dist.shasum --json`);
+    const npmCurrentVersionIntegrity = runJsonCmd<string>(`npm view @zuzjs/pm@${pkg.version} dist.integrity --json`);
+
+    let localPackInfo = runJsonCmd<Array<{ filename: string; shasum: string; integrity?: string }>>(
+      "npm pack --json --dry-run",
+      packageRoot,
+    );
+
+    if (!localPackInfo) {
+      localPackInfo = runJsonCmd<Array<{ filename: string; shasum: string; integrity?: string }>>(
+        "npm pack --json",
+        packageRoot,
+      );
+
+      const tarballName = localPackInfo?.[0]?.filename;
+      if (tarballName) {
+        const tarballPath = path.join(packageRoot, tarballName);
+        if (fs.existsSync(tarballPath)) fs.unlinkSync(tarballPath);
+      }
+    }
+
+    const localPackedShasum = localPackInfo?.[0]?.shasum ?? null;
+    const localPackedIntegrity = localPackInfo?.[0]?.integrity ?? null;
+
+    const shasumMatchesRegistry =
+      !!npmCurrentVersionShasum &&
+      !!localPackedShasum &&
+      npmCurrentVersionShasum === localPackedShasum;
+
+    const integrityMatchesRegistry =
+      !!npmCurrentVersionIntegrity &&
+      !!localPackedIntegrity &&
+      npmCurrentVersionIntegrity === localPackedIntegrity;
+
+    const gitDirtyRaw = runCmd("git status --porcelain", packageRoot);
+    const gitDirty = gitDirtyRaw ? gitDirtyRaw.length > 0 : null;
+
+    const statusLabel = (ok: boolean | null) => {
+      if (ok === null) return pc.yellow("UNKNOWN");
+      return ok ? pc.green("OK") : pc.red("FAIL");
+    };
+
+    console.log(pc.bold("\nZPM Doctor"));
+    console.log(pc.gray("--------------------------------------------------"));
+    console.log(`Namespace:           ${pc.cyan(namespace)}`);
+    console.log(`Socket path:         ${socketPath} (${socketExists ? pc.green("exists") : pc.yellow("missing")})`);
+    console.log(`PID file:            ${pidFilePath} (${pidFileExists ? pc.green("exists") : pc.yellow("missing")})`);
+    console.log(`PID value:           ${pid ?? "N/A"}`);
+    console.log(`PID alive:           ${statusLabel(pidAlive)}`);
+    console.log(`Daemon reachable:    ${statusLabel(daemonReachable)}`);
+
+    console.log(pc.gray("\nInstall / Binary"));
+    console.log(pc.gray("--------------------------------------------------"));
+    console.log(`CLI package version: ${pkg.version}`);
+    console.log(`Global zpm path:     ${globalBinPath ?? "N/A"}`);
+    console.log(`Global pkg version:  ${globalPkg?.version ?? "N/A"}`);
+    console.log(`Local cli sha256:    ${localCliHash ?? "N/A"}`);
+    console.log(`Global cli sha256:   ${globalCliHash ?? "N/A"}`);
+    console.log(`CLI hash match:      ${statusLabel(!!localCliHash && !!globalCliHash ? localCliHash === globalCliHash : null)}`);
+
+    console.log(pc.gray("\nRegistry / Publish"));
+    console.log(pc.gray("--------------------------------------------------"));
+    console.log(`npm latest version:  ${npmLatestVersion ?? "N/A"}`);
+    console.log(`npm dist.shasum:     ${npmCurrentVersionShasum ?? "N/A"}`);
+    console.log(`local pack shasum:   ${localPackedShasum ?? "N/A"}`);
+    console.log(`shasum match:        ${statusLabel(npmCurrentVersionShasum && localPackedShasum ? shasumMatchesRegistry : null)}`);
+    console.log(`npm integrity:       ${npmCurrentVersionIntegrity ?? "N/A"}`);
+    console.log(`local integrity:     ${localPackedIntegrity ?? "N/A"}`);
+    console.log(`integrity match:     ${statusLabel(npmCurrentVersionIntegrity && localPackedIntegrity ? integrityMatchesRegistry : null)}`);
+
+    console.log(pc.gray("\nWorkspace"));
+    console.log(pc.gray("--------------------------------------------------"));
+    console.log(`git working tree:    ${gitDirty === null ? pc.yellow("UNKNOWN") : gitDirty ? pc.yellow("DIRTY") : pc.green("CLEAN")}`);
+
+    console.log(pc.gray("\nHints"));
+    console.log(pc.gray("--------------------------------------------------"));
+    if (!daemonReachable && pidFileExists && pidAlive === false) {
+      console.log(pc.yellow("- Stale PID file detected. Run `zpm kill-daemon` to clean it."));
+    }
+    if (globalPkg?.version && globalPkg.version !== pkg.version) {
+      console.log(pc.yellow(`- Global version (${globalPkg.version}) differs from current package (${pkg.version}).`));
+    }
+    if (npmLatestVersion && npmLatestVersion !== pkg.version) {
+      console.log(pc.yellow(`- Local package version (${pkg.version}) is not npm latest (${npmLatestVersion}).`));
+    }
+    if (npmCurrentVersionShasum && localPackedShasum && !shasumMatchesRegistry) {
+      console.log(pc.red("- Local packed artifact hash does not match npm dist.shasum for this version."));
+      console.log(pc.red("  This usually means code changed without version bump/re-publish."));
+    }
+    console.log("");
   });
 
 program.parse(process.argv);

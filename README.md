@@ -57,6 +57,9 @@ zpm delete  api
 # Daemon
 zpm kill-daemon
 
+# Doctor (deep diagnostics)
+zpm doctor
+
 # Namespace (optional but recommended for isolated environments)
 zpm --namespace local-debug start pnpm --name app --arg="run start"
 zpm --namespace local-debug stats app
@@ -73,6 +76,13 @@ zpm stats app
 zpm logs
 zpm logs api
 ```
+
+`zpm doctor` checks:
+
+- Namespace wiring (`--namespace` / `ZPM_NAMESPACE`), socket path, PID file, and daemon reachability
+- Local CLI hash vs global CLI hash
+- npm registry metadata (`dist.shasum` + `dist.integrity`) vs your local `npm pack` artifact
+- Working tree cleanliness (git dirty/clean)
 
 ### `zpm start` patterns
 

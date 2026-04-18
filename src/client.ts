@@ -129,7 +129,8 @@ export class ZPMClient {
   public async killDaemon(): Promise<void> {
     const pidFile = path.join(os.tmpdir(), `${this.namespace}.pid`);
     if (!fs.existsSync(pidFile)) {
-      throw new Error("Daemon PID file not found – is the daemon running?");
+      console.log(`[ZPM] No daemon PID file for namespace "${this.namespace}" (already stopped).`);
+      return;
     }
     const pid = Number(fs.readFileSync(pidFile, "utf8").trim());
     if (!Number.isFinite(pid) || pid <= 0) {
