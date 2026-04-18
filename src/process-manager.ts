@@ -20,15 +20,65 @@ import { Worker } from "./worker";
 export class ProcessManager {
 
   private workers = new Map<string, Worker>();
+  private readonly stateDir: string;
   public readonly SNAPSHOT_FILE: string;
 
   constructor() {
     const namespace = process.env.ZPM_NAMESPACE ?? "zuz-pm";
     const isRoot = typeof process.getuid === "function" && process.getuid() === 0;
-    const stateDir = process.env.ZPM_STATE_DIR
+    this.stateDir = process.env.ZPM_STATE_DIR
       ?? (isRoot ? "/var/lib/zpm" : path.join(os.homedir(), ".zpm"));
 
-    this.SNAPSHOT_FILE = path.join(stateDir, `snapshot.${namespace}.json`);
+    this.SNAPSHOT_FILE = path.join(this.stateDir, `snapshot.${namespace}.json`);
+    this.migrateLegacySnapshot(namespace);
+  }
+
+  private migrateLegacySnapshot(namespace: string): void {
+    try {
+      if (fs.existsSync(this.SNAPSHOT_FILE)) return;
+
+      const candidates = new Set<string>();
+      const homeDir = os.homedir();
+      const isRoot = typeof process.getuid === "function" && process.getuid() === 0;
+
+      // Current state directory legacy names.
+      candidates.add(path.join(this.stateDir, "snapshot.json"));
+      candidates.add(path.join(this.stateDir, `snapshot.${namespace}.json`));
+      candidates.add(path.join(this.stateDir, "snapshot.zuz-pm.json"));
+      candidates.add(path.join(this.stateDir, "snapshot.zuzjs-pm.json"));
+
+      // Old per-user location used by earlier versions.
+      candidates.add(path.join(homeDir, ".zpm", "snapshot.json"));
+      candidates.add(path.join(homeDir, ".zpm", "snapshot.zuz-pm.json"));
+      candidates.add(path.join(homeDir, ".zpm", "snapshot.zuzjs-pm.json"));
+
+      // When running as root service, older snapshots were often under /root/.zpm.
+      if (isRoot) {
+        candidates.add(path.join("/root", ".zpm", "snapshot.json"));
+        candidates.add(path.join("/root", ".zpm", "snapshot.zuz-pm.json"));
+        candidates.add(path.join("/root", ".zpm", "snapshot.zuzjs-pm.json"));
+      }
+
+      for (const source of candidates) {
+        if (!source || source === this.SNAPSHOT_FILE) continue;
+        if (!fs.existsSync(source)) continue;
+
+        const raw = fs.readFileSync(source, "utf8").trim();
+        if (!raw) continue;
+
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) continue;
+
+        const dir = path.dirname(this.SNAPSHOT_FILE);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+        fs.writeFileSync(this.SNAPSHOT_FILE, JSON.stringify(parsed, null, 2));
+        logger.warn("daemon", `Migrated legacy snapshot from ${source} -> ${this.SNAPSHOT_FILE}`);
+        return;
+      }
+    } catch (err: any) {
+      logger.warn("daemon", `Legacy snapshot migration skipped: ${err?.message ?? String(err)}`);
+    }
   }
 
   // CRUD
